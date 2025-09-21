@@ -1,6 +1,6 @@
 import React from "react";
-import LocationSelectScreen from "./src/screens/LocationSelectScreen";
+import MapScreen from "./src/screens/MapScreen"
 
 export default function App() {
-  return <LocationSelectScreen />;
+  return <MapScreen />;
 }
