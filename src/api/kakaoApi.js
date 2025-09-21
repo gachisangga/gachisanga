@@ -10,6 +10,7 @@ export const getCoordsByAddress = async (address) => {
         params: { query: address },
         headers: {
           Authorization: `KakaoAK ${Config.KAKAO_REST_KEY}`, // ✅ 변수 이름 통일
+          
         },
       }
     );
