@@ -3,7 +3,8 @@ import { View, TextInput, Button, StyleSheet } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { getCoordsByAddress } from "../api/kakaoApi";
 import { getStoresInRadius } from "../api/StoresInRadius";
-import Config from "react-native-config";
+import { getAdmmCdByDong } from "../api/lawDongApi";   // ✅ 추가
+import { getPopulationByDong } from "../api/populationApi"; // ✅ 추가
 
 const MapScreen = () => {
   const [address, setAddress] = useState("");
@@ -22,6 +23,23 @@ const MapScreen = () => {
       // ✅ 2. 반경 내 상가 조회
       const stores = await getStoresInRadius(result);
       console.log("👉 주변 상가 리스트:", stores);
+
+      
+
+
+      // ✅ 3. 주소명으로 행정동 코드(admmCd) 변환
+      const { fullDongName } = result;
+  console.log("👉 카카오에서 받은 fullDongName:", fullDongName);
+  const dongName = fullDongName.split(" ").pop(); // "서창동"    
+  
+  const admmCd = await getAdmmCdByDong(fullDongName);
+      console.log("👉 변환된 admmCd:", admmCd);
+
+      if (admmCd) {
+        // ✅ 4. 인구 API 조회
+        const population = await getPopulationByDong(admmCd,dongName);
+        console.log("📊 인구 데이터:", population);
+      }
     }
   };
 

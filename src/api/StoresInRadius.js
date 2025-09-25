@@ -11,7 +11,7 @@ export const getStoresInRadius = async ({ latitude, longitude, radius = 500 }) =
       params: {
         ServiceKey: Config.SERVICE_KEY, // .env에 넣어둔 값
         pageNo: 1,
-        numOfRows: 100,
+        numOfRows: 500,
         radius: radius, // 500m
         cx: longitude,  // 경도
         cy: latitude,   // 위도
