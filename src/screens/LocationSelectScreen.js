@@ -15,7 +15,7 @@ const LocationSelectScreen = () => {
   const [selectedSigungu, setSelectedSigungu] = useState("");
   const [selectedDong, setSelectedDong] = useState("");
 
-  // ✅ 시/도 가져오기
+  // 시/도 가져오기
   useEffect(() => {
     const fetchSido = async () => {
       try {
@@ -27,7 +27,7 @@ const LocationSelectScreen = () => {
             type: "json",
           },
         });
-        console.log("✅ 시/도 응답:", res.data);
+        console.log("시/도 응답:", res.data);
         setSidoList(res.data.body?.items || []);
       } catch (err) {
         console.error("시/도 불러오기 실패:", err);
@@ -36,7 +36,7 @@ const LocationSelectScreen = () => {
     fetchSido();
   }, []);
 
-  // ✅ 시/도 선택 시 군/구 가져오기
+  // 시/도 선택 시 군/구 가져오기
   useEffect(() => {
     if (!selectedSido) return;
     const fetchSigungu = async () => {
@@ -50,7 +50,7 @@ const LocationSelectScreen = () => {
             type: "json",
           },
         });
-        console.log("📌 군/구 응답:", res.data);
+        console.log("군/구 응답:", res.data);
         setSigunguList(res.data.body?.items || []);
         setDongList([]);
         setSelectedSigungu("");
@@ -62,7 +62,7 @@ const LocationSelectScreen = () => {
     fetchSigungu();
   }, [selectedSido]);
 
-  // ✅ 군/구 선택 시 읍/면/동 가져오기
+  // 군/구 선택 시 읍/면/동 가져오기
   useEffect(() => {
     if (!selectedSigungu) return;
     const fetchDong = async () => {
@@ -76,7 +76,7 @@ const LocationSelectScreen = () => {
             type: "json",
           },
         });
-        console.log("📌 읍/면/동 응답:", res.data);
+        console.log("읍/면/동 응답:", res.data);
         setDongList(res.data.body?.items || []);
         setSelectedDong("");
       } catch (err) {
@@ -94,7 +94,7 @@ const LocationSelectScreen = () => {
       <Picker
         selectedValue={selectedSido}
         onValueChange={(val) => {
-          console.log("✅ 시/도 선택됨:", val);
+          console.log("시/도 선택됨:", val);
           setSelectedSido(val);
         }}
       >
@@ -112,7 +112,7 @@ const LocationSelectScreen = () => {
       <Picker
         selectedValue={selectedSigungu}
         onValueChange={(val) => {
-          console.log("✅ 시/군/구 선택됨:", val);
+          console.log("시/군/구 선택됨:", val);
           setSelectedSigungu(val);
         }}
         enabled={sigunguList.length > 0}
@@ -131,7 +131,7 @@ const LocationSelectScreen = () => {
       <Picker
         selectedValue={selectedDong}
         onValueChange={(val) => {
-          console.log("✅ 읍/면/동 선택됨:", val);
+          console.log("읍/면/동 선택됨:", val);
           setSelectedDong(val);
         }}
         enabled={dongList.length > 0}

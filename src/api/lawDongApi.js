@@ -17,11 +17,11 @@ export const getAdmmCdByDong = async (fullDongName) => {
 
     const rows = res.data?.StanReginCd?.[1]?.row;
     if (!rows || rows.length === 0) {
-      console.warn("⚠️ 행정동 코드 찾을 수 없음:", fullDongName);
+      console.warn("행정동 코드 찾을 수 없음:", fullDongName);
       return null;
     }
 
-    // ✅ 전체 주소명(locatadd_nm)이 fullDongName과 정확히 일치하는 항목 찾기
+    // 전체 주소명(locatadd_nm)이 fullDongName과 정확히 일치하는 항목 찾기
     const exact = rows.find((r) => r.locatadd_nm === fullDongName);
 
     if (!exact) {
@@ -31,7 +31,7 @@ export const getAdmmCdByDong = async (fullDongName) => {
 
     return exact.region_cd;
   } catch (err) {
-    console.error("❌ 법정동코드 API 요청 실패:", err.response?.data || err.message);
+    console.error("법정동코드 API 요청 실패:", err.response?.data || err.message);
     return null;
   }
 };

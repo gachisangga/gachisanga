@@ -4,7 +4,7 @@ import Config from "react-native-config";
 const STORE_API_URL =
   "https://apis.data.go.kr/B553077/api/open/sdsc2/storeListInRadius";
 
-// ✅ 반경 내 상가 조회
+// 반경 내 상가 조회
 export const getStoresInRadius = async ({ latitude, longitude, radius = 500 }) => {
   try {
     const res = await axios.get(STORE_API_URL, {
@@ -19,10 +19,10 @@ export const getStoresInRadius = async ({ latitude, longitude, radius = 500 }) =
       },
     });
 
-    console.log("📌 상가 조회 응답:", res.data);
+    console.log("상가 조회 응답:", res.data);
     return res.data.body?.items || [];
   } catch (err) {
-    console.error("❌ 상가 조회 실패:", err.response?.data || err.message);
+    console.error("상가 조회 실패:", err.response?.data || err.message);
     return [];
   }
 };
