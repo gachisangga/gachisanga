@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Keyboard,
   ActivityIndicator,
+  TouchableOpacity,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { getCoordsByAddress } from "../api/kakaoApi";
@@ -19,6 +20,30 @@ import { getPopulationByDong } from "../api/populationApi";
 import { buildRecommendPayload } from "../utils/buildRecommendPayload";
 import { fetchRecommendations } from "../utils/fetchRecommendations";
 
+/** ----------------------------------------------------------------------------
+ * 카테고리 정책(프론트에서 필터링)
+ * ---------------------------------------------------------------------------*/
+const CATEGORY_META = {
+  "카페/디저트": { openable: true,  needsLicense: false, franchiseable: true },
+  "분식":        { openable: true,  needsLicense: false, franchiseable: true },
+  "패스트푸드":   { openable: true,  needsLicense: false, franchiseable: true },
+  "편의점":      { openable: true,  needsLicense: false, franchiseable: true },
+  "뷰티/미용":    { openable: true,  needsLicense: true,  franchiseable: true }, // 일부 시술은 허가 필요
+  "한식":        { openable: true,  needsLicense: false, franchiseable: true },
+
+  // 전문/허가 필요 — 일반 사용자는 보통 바로 개업 어려움
+  "보건의료":     { openable: false, needsLicense: true,  franchiseable: false },
+  "교육":        { openable: false, needsLicense: true,  franchiseable: true  },
+  "부동산":      { openable: false, needsLicense: true,  franchiseable: false },
+  "숙박":        { openable: false, needsLicense: true,  franchiseable: true  },
+
+  // 기타(필요 시 추가/수정)
+  "예술·스포츠": { openable: true,  needsLicense: false, franchiseable: true },
+  "소매":        { openable: true,  needsLicense: false, franchiseable: true },
+  "음식":        { openable: true,  needsLicense: false, franchiseable: true },
+};
+const getMeta = (cat) => CATEGORY_META[cat] ?? { openable: true, needsLicense: false, franchiseable: false };
+
 const MapScreen = () => {
   const [address, setAddress] = useState("");
   const [coords, setCoords] = useState(null);
@@ -29,6 +54,9 @@ const MapScreen = () => {
   // UX 보강
   const [loading, setLoading] = useState(false);
   const [errMsg, setErrMsg] = useState(null);
+
+  // 탭(일반/허가) 스위치
+  const [activeTab, setActiveTab] = useState("openable"); // "openable" | "licensed"
 
   const handleSearch = async () => {
     if (!address.trim() || loading) return;
@@ -76,8 +104,8 @@ const MapScreen = () => {
       const payload = buildRecommendPayload({
         kakaoAddr: kakaoAddrObj,
         storesResp: stores,
-        areaCd: undefined, // 있으면 넣기
-        topK: 5,
+        areaCd: undefined, 
+        topK: 10,               // ✅ 넉넉히 받아오기 (각 그룹 5개 채우기 위해)
       });
 
       const rec = await fetchRecommendations(payload); // { topCategories, why?, debug? }
@@ -96,11 +124,18 @@ const MapScreen = () => {
   // Why 라인(서버 우선, 없으면 폴백)
   const whyLine = recoData?.why?.line ?? buildWhyFallback(recoData) ?? null;
 
-  // ★ Why 상세(서버 우선, 없으면 debug로 폴백 생성)
+  // Why 상세(서버 우선, 없으면 debug로 폴백 생성)
   const d = recoData?.why?.details ?? buildDetailsFallback(recoData) ?? null;
 
   // Top-K 목록
   const top = Array.isArray(recoData?.topCategories) ? recoData.topCategories : [];
+
+  // 분리: 일반/허가
+  const { openableList, licensedList } = partitionCategories(top);
+
+  // 각 5개로 고정 (부족하면 서로에서 백필)
+  const openable5  = fillToFive(openableList, licensedList);
+  const licensed5  = fillToFive(licensedList, openableList);
 
   // 지도 영역
   const region = coords
@@ -209,30 +244,25 @@ const MapScreen = () => {
                   )}
                 </>
               )}
-
-              {/* 경쟁도 */}
-              <Text style={styles.sectionTitle}>경쟁도</Text>
-              <Text style={styles.item}>
-                {d.poi?.competition?.topCategory
-                  ? `${d.poi.competition.topCategory} 업종 비중 ${fmtPct(d.poi.competition.sameShare)} (${d.poi.competition.sameCount}/${d.poi?.total}) · ${d.poi.competition.label}`
-                  : "분석 불가"}
-              </Text>
             </View>
           ) : null}
 
-          {/* 추천 업종 리스트 */}
+          {/* 탭 스위치 */}
+          {!loading && !errMsg && top.length > 0 && (
+            <View style={styles.tabs}>
+              <TabButton label="일반 창업 가능" active={activeTab === "openable"} onPress={() => setActiveTab("openable")} />
+              <TabButton label="전문/허가 필요" active={activeTab === "licensed"} onPress={() => setActiveTab("licensed")} />
+            </View>
+          )}
+
+          {/* 추천 업종 리스트 (탭에 따라) */}
           {!loading && !errMsg && top.length > 0 ? (
             <>
               <View style={styles.divider} />
-              <Text style={styles.recoTitle}>추천 업종</Text>
-              {top.map((r) => (
-                <Text key={`${r.category}`} style={styles.recoItem}>
-                  • {r.category}{" "}
-                  <Text style={styles.recoScore}>
-                    {typeof r.score === "number" ? r.score.toFixed(3) : String(r.score)}
-                  </Text>
-                </Text>
-              ))}
+              <Text style={styles.recoTitle}>
+                {activeTab === "openable" ? "일반 창업 가능 (5개)" : "전문/허가 필요 (5개)"}
+              </Text>
+              {renderCategoryList(activeTab === "openable" ? openable5 : licensed5)}
             </>
           ) : null}
         </View>
@@ -253,6 +283,59 @@ const MapScreen = () => {
     </View>
   );
 };
+
+/** 리스트 렌더러 (한 파일 내 간단 버전) */
+function renderCategoryList(items) {
+  return items.map((r) => {
+    const meta = getMeta(r.category);
+    return (
+      <Text key={r.category} style={styles.recoItem}>
+        • {r.category}
+        <Text style={styles.recoScore}>
+          {" "}{typeof r.score === "number" ? r.score.toFixed(3) : String(r.score)}
+        </Text>
+        {!meta.openable && <Text style={styles.licenseBadge}>  허가/자격 필요</Text>}
+        {r._fromOtherGroup && <Text style={styles.altBadge}>  대체추천</Text>}
+      </Text>
+    );
+  });
+}
+
+/** 카테고리 분리 */
+function partitionCategories(items = []) {
+  const openableList = [];
+  const licensedList = [];
+  for (const x of items) {
+    const m = getMeta(x.category);
+    if (m.openable) openableList.push(x);
+    else licensedList.push(x);
+  }
+  return { openableList, licensedList };
+}
+
+/** 5개로 고정: 부족하면 다른 그룹에서 백필(중복 방지 & 표시용 플래그) */
+function fillToFive(primary, secondary) {
+  const want = 5;
+  const base = primary.slice(0, want);
+  if (base.length >= want) return base;
+
+  const need = want - base.length;
+  const extras = secondary
+    .filter(x => !base.find(b => b.category === x.category))
+    .slice(0, need)
+    .map(x => ({ ...x, _fromOtherGroup: true }));
+
+  return base.concat(extras);
+}
+
+/** 탭 버튼 (간단 스타일) */
+function TabButton({ label, active, onPress }) {
+  return (
+    <TouchableOpacity onPress={onPress} style={[styles.tabBtn, active && styles.tabBtnActive]}>
+      <Text style={[styles.tabTxt, active && styles.tabTxtActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
 /** Why 폴백(서버가 why.line을 못 줄 때) */
 function buildWhyFallback(rec) {
@@ -430,6 +513,22 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#111827",
   },
+  tabs: {
+    flexDirection: "row",
+    backgroundColor: "#F3F4F6",
+    borderRadius: 10,
+    padding: 4,
+    marginTop: 10,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  tabBtnActive: { backgroundColor: "white", elevation: 2 },
+  tabTxt: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
+  tabTxtActive: { color: "#111827" },
   sectionTitle: { marginTop: 10, fontWeight: "700" },
   subTitle: { marginTop: 6, fontWeight: "600" },
   item: { fontSize: 12, color: "#111", marginTop: 2 },
@@ -441,6 +540,24 @@ const styles = StyleSheet.create({
   recoTitle: { fontWeight: "700", marginBottom: 6 },
   recoItem: { fontSize: 14, marginVertical: 2 },
   recoScore: { color: "#666", fontSize: 12 },
+  licenseBadge: {
+    fontSize: 10,
+    color: "#92400E",
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  altBadge: {
+    fontSize: 10,
+    color: "#2563EB",
+    backgroundColor: "#DBEAFE",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+    marginLeft: 4,
+  },
+  dim: { fontSize: 12, color: "#6B7280" },
 });
 
 export default MapScreen;
