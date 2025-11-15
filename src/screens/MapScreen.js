@@ -1,5 +1,5 @@
 // src/screens/MapScreen.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -19,6 +19,11 @@ import { getPopulationByDong } from "../api/populationApi";
 // 유틸
 import { buildRecommendPayload } from "../utils/buildRecommendPayload";
 import { fetchRecommendations } from "../utils/fetchRecommendations";
+
+/** ----------------------------------------------------------------------------
+ * 서버 API 베이스 URL
+ * ---------------------------------------------------------------------------*/
+const RECO_API_BASE = "http://localhost:3000/api/v1"; // 필요하면 IP/포트 수정
 
 /** ----------------------------------------------------------------------------
  * 카테고리 정책(프론트에서 필터링)
@@ -47,7 +52,11 @@ const CATEGORY_META = {
   음식: { openable: true, needsLicense: false, franchiseable: true },
 };
 const getMeta = (cat) =>
-  CATEGORY_META[cat] ?? { openable: true, needsLicense: false, franchiseable: false };
+  CATEGORY_META[cat] ?? {
+    openable: true,
+    needsLicense: false,
+    franchiseable: false,
+  };
 
 const MapScreen = () => {
   const [address, setAddress] = useState("");
@@ -66,6 +75,11 @@ const MapScreen = () => {
   // 사용자 분류 선택 (대/중분류)
   const [selectedL, setSelectedL] = useState(null); // 대분류
   const [selectedM, setSelectedM] = useState(null); // 중분류
+
+  // 🔹 프랜차이즈(브랜드) 목록 상태
+  const [brandList, setBrandList] = useState([]);
+  const [brandLoading, setBrandLoading] = useState(false);
+  const [brandErr, setBrandErr] = useState(null);
 
   const handleSearch = async () => {
     if (!address.trim() || loading) return;
@@ -242,6 +256,45 @@ const MapScreen = () => {
     setSelectedM(next);
   };
 
+  /** 🔹 선택된 대/중분류 → 프랜차이즈 목록 연동 */
+  useEffect(() => {
+    // 아무것도 선택 안 했으면 리스트/에러 초기화
+    if (!selectedL && !selectedM) {
+      setBrandList([]);
+      setBrandErr(null);
+      return;
+    }
+
+    const fetchBrands = async () => {
+      try {
+        setBrandLoading(true);
+        setBrandErr(null);
+
+        const qs = new URLSearchParams();
+        if (selectedL) qs.append("l", selectedL); // 대분류
+        if (selectedM) qs.append("m", selectedM); // 중분류
+        qs.append("year", "2023"); // 일단 2023 고정 (필요하면 최신 연도로 수정)
+
+        const res = await fetch(
+          `${RECO_API_BASE}/brands/by-category?${qs.toString()}`
+        );
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const json = await res.json();
+        setBrandList(json.brands || []);
+      } catch (e) {
+        console.log("브랜드 조회 실패:", e);
+        setBrandErr("프랜차이즈 정보를 불러오지 못했어요.");
+        setBrandList([]);
+      } finally {
+        setBrandLoading(false);
+      }
+    };
+
+    fetchBrands();
+  }, [selectedL, selectedM]);
+
   return (
     <View style={{ flex: 1 }}>
       {/* 지도 */}
@@ -408,6 +461,37 @@ const MapScreen = () => {
               <Text style={styles.dim}>
                 ※ 대/중분류를 바꾸면, 해당 계층에 속한 소분류만 추천 리스트에 보여줘요.
               </Text>
+
+              {/* 🔹 소분류 (프랜차이즈) 리스트 */}
+              <Text style={styles.subTitle}>소분류 (프랜차이즈)</Text>
+              {brandLoading && (
+                <Text style={styles.dim}>프랜차이즈 불러오는 중…</Text>
+              )}
+              {!brandLoading && brandErr && (
+                <Text style={{ color: "#B91C1C", fontSize: 12 }}>
+                  {brandErr}
+                </Text>
+              )}
+              {!brandLoading && !brandErr && (
+                brandList.length > 0 ? (
+                  <View style={{ marginTop: 4 }}>
+                    {brandList.slice(0, 10).map((b) => (
+                      <Text key={b.brandNm} style={styles.item}>
+                        • {b.brandNm}
+                        {b.frcsCnt != null && ` (${b.frcsCnt}개 점포)`}
+                        {b.avrgSlsAmt != null &&
+                          ` · 평균매출 ${Number(
+                            b.avrgSlsAmt
+                          ).toLocaleString()}원`}
+                      </Text>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.dim}>
+                    선택한 업종에 연동된 프랜차이즈 정보가 없어요.
+                  </Text>
+                )
+              )}
             </View>
           )}
 
