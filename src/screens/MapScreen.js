@@ -81,10 +81,17 @@ const MapScreen = () => {
   const [brandLoading, setBrandLoading] = useState(false);
   const [brandErr, setBrandErr] = useState(null);
 
+  // 🔹 화면 단계: idle | summary | category | result
+  const [step, setStep] = useState("idle");
+  // 🔹 결과 단계에서 보고 있는 소분류(추천 아이템)
+  const [selectedCategory, setSelectedCategory] = useState(null);
+
   const handleSearch = async () => {
     if (!address.trim() || loading) return;
     setErrMsg(null);
     setLoading(true);
+    setStep("idle");
+    setSelectedCategory(null);
     Keyboard.dismiss();
 
     try {
@@ -146,10 +153,14 @@ const MapScreen = () => {
       console.log("추천 결과 원본:", JSON.stringify(rec, null, 2));
 
       setRecoData(rec);
+      console.log("featureVector:", recoData?.debug?.featureVector);
+
+      setStep("summary"); // ✅ 검색 끝나면 상권 요약 단계 진입
     } catch (e) {
       console.warn("추천 호출 실패:", e?.message ?? e);
       setErrMsg(e?.message || "요청 중 오류가 발생했습니다.");
       setRecoData(null);
+      setStep("idle");
     } finally {
       setLoading(false);
     }
@@ -221,8 +232,11 @@ const MapScreen = () => {
     return belongsToSelectedBranch(sName);
   });
 
-  // 분리: 일반/허가
-  const { openableList, licensedList } = partitionCategories(filteredTop);
+  // 🔹 필터 결과가 비면 전체 top을 fallback으로 사용
+  const effectiveTop = filteredTop.length > 0 ? filteredTop : top;
+
+  // 분리: 일반/허가 (항상 effectiveTop 기준)
+  const { openableList, licensedList } = partitionCategories(effectiveTop);
 
   // 각 5개로 고정 (부족하면 서로에서 백필)
   const openable5 = fillToFive(openableList, licensedList);
@@ -295,6 +309,8 @@ const MapScreen = () => {
     fetchBrands();
   }, [selectedL, selectedM]);
 
+  const hasReco = !!recoData;
+
   return (
     <View style={{ flex: 1 }}>
       {/* 지도 */}
@@ -310,7 +326,7 @@ const MapScreen = () => {
       </MapView>
 
       {/* 결과 패널 */}
-      {(loading || errMsg || whyLine || filteredTop.length > 0) && (
+      {(loading || errMsg || hasReco) && (
         <View style={styles.recoContainer}>
           {/* 로딩 */}
           {loading && (
@@ -329,202 +345,289 @@ const MapScreen = () => {
             </Text>
           )}
 
-          {/* Why 배지 */}
-          {!loading && !errMsg && whyLine ? (
-            <View style={styles.whyBadge}>
-              <Text style={styles.whyText}>{whyLine}</Text>
-            </View>
-          ) : null}
+          {/* 정상 데이터 있을 때만 단계 UI 렌더링 */}
+          {!loading && !errMsg && hasReco && (
+            <>
+              {/* 1) 요약 단계 */}
+              {step === "summary" && (
+                <View>
+                  {/* Why 배지 */}
+                  {whyLine && (
+                    <View style={styles.whyBadge}>
+                      <Text style={styles.whyText}>{whyLine}</Text>
+                    </View>
+                  )}
 
-          {/* 상세 근거 섹션 */}
-          {!loading && !errMsg && d ? (
-            <View>
-              {/* 인구/연령 */}
-              <Text style={styles.sectionTitle}>인구·연령</Text>
-              <Text style={styles.item}>
-                {d.demographics?.female?.label}
-                {" · "}
-                {d.demographics?.age20s?.label}
-                {" · "}
-                {d.demographics?.age30s?.label}
-              </Text>
+                  {/* 인구/상권/업종 분포 요약 */}
+                  {d && (
+                    <>
+                      <Text style={styles.sectionTitle}>인구·연령</Text>
+                      <Text style={styles.item}>
+                        {d.demographics?.female?.label}
+                        {" · "}
+                        {d.demographics?.age20s?.label}
+                        {" · "}
+                        {d.demographics?.age30s?.label}
+                      </Text>
 
-              {/* 상권/결제 */}
-              <Text style={styles.sectionTitle}>상권/결제</Text>
-              {d.commerce?.notes ? (
-                <Text style={styles.item}>{d.commerce.notes}</Text>
-              ) : (
-                <Text style={styles.item}>
-                  결제강도(log) {fmtNum(d.commerce?.pay_cnt_log)} · 상권레벨{" "}
-                  {fmtNum(d.commerce?.cmrcl_level)}
-                </Text>
+                      <Text style={styles.sectionTitle}>상권/결제</Text>
+                      <Text style={styles.item}>
+                        {d.commerce?.notes ||
+                          `결제강도(log) ${fmtNum(
+                            d.commerce?.pay_cnt_log
+                          )} · 상권레벨 ${fmtNum(d.commerce?.cmrcl_level)}`}
+                      </Text>
+
+                      <Text style={styles.sectionTitle}>업종 분포</Text>
+                      <Text style={styles.item}>
+                        총 {d.poi?.total ?? 0}개 · 다양도(entropy){" "}
+                        {fmtNum(d.poi?.entropy)}
+                      </Text>
+                    </>
+                  )}
+
+                  {/* 업종 선택 단계로 이동 버튼 */}
+                  <View style={{ marginTop: 10 }}>
+                    <TouchableOpacity
+                      style={[styles.tabBtn, styles.tabBtnActive]}
+                      onPress={() => setStep("category")}
+                    >
+                      <Text style={styles.tabTxtActive}>추천 업종 보기</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               )}
 
-              {/* 업종 분포 */}
-              <Text style={styles.sectionTitle}>업종 분포</Text>
-              <Text style={styles.item}>
-                총 {d.poi?.total ?? 0}개 · 다양도(entropy){" "}
-                {fmtNum(d.poi?.entropy)}
-              </Text>
+              {/* 2) 업종 선택 단계 */}
+              {step === "category" && (
+                <View>
+                  {/* Why 배지 한 번 더 보여줘도 됨 */}
+                  {whyLine && (
+                    <View style={styles.whyBadge}>
+                      <Text style={styles.whyText}>{whyLine}</Text>
+                    </View>
+                  )}
 
-              {/* 표본 적으면 안내 */}
-              {(d.poi?.total ?? 0) < 5 ? (
-                <Text style={styles.item}>
-                  표본이 적어 상위/하위 업종 비교는 생략했어요.
-                </Text>
-              ) : (
-                <>
-                  {/* 많은 업종 Top 3 */}
-                  {Array.isArray(d.poi?.topMost) &&
-                    d.poi.topMost.length > 0 && (
-                      <>
-                        <Text style={styles.subTitle}>많은 업종 Top 3</Text>
-                        {d.poi.topMost.slice(0, 3).map((x) => (
-                          <Text
-                            key={`top-${x.category}`}
-                            style={styles.item}
-                          >
-                            • {x.category} {fmtPct(x.share)} ({x.count})
-                          </Text>
+                  {/* 업종 필터 (대/중분류 + 프랜차이즈) */}
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={styles.sectionTitle}>업종 필터</Text>
+
+                    {/* 대분류 선택 */}
+                    <Text style={styles.subTitle}>대분류 선택</Text>
+                    <View style={styles.chipRow}>
+                      {lOptions.map((l) => (
+                        <Chip
+                          key={l}
+                          label={l}
+                          active={selectedL === l}
+                          onPress={() => handleSelectL(l)}
+                        />
+                      ))}
+                      {lOptions.length === 0 && (
+                        <Text style={styles.dim}>
+                          대분류 정보가 부족합니다.
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* 중분류 선택 */}
+                    <Text style={styles.subTitle}>중분류 선택</Text>
+                    {mOptions.length > 0 ? (
+                      <View style={styles.chipRow}>
+                        {mOptions.map((m) => (
+                          <Chip
+                            key={m}
+                            label={m}
+                            active={selectedM === m}
+                            onPress={() => handleSelectM(m)}
+                          />
                         ))}
-                      </>
+                      </View>
+                    ) : (
+                      <Text style={styles.dim}>
+                        이 상권에서는 중분류 데이터가 거의 없어 대분류만 사용할
+                        수 있어요.
+                      </Text>
                     )}
 
-                  {/* 적은 업종 Top 3 (중복 제거) */}
-                  {Array.isArray(d.poi?.leastCommon) &&
-                    d.poi.leastCommon.length > 0 && (
-                      <>
-                        <Text style={styles.subTitle}>적은 업종 Top 3</Text>
-                        {d.poi.leastCommon
-                          .filter(
-                            (x) =>
-                              !d.poi.topMost?.some?.(
-                                (y) => y.category === x.category
-                              )
-                          )
-                          .slice(0, 3)
-                          .map((x) => (
-                            <Text
-                              key={`low-${x.category}`}
-                              style={styles.item}
-                            >
-                              • {x.category} {fmtPct(x.share)} ({x.count})
+                    <Text style={styles.dim}>
+                      ※ 대/중분류를 바꾸면, 해당 계층에 속한 소분류만 추천
+                      리스트에 보여줘요.
+                    </Text>
+
+                    {/* 소분류 (프랜차이즈) 리스트 */}
+                    <Text style={styles.subTitle}>소분류 (프랜차이즈)</Text>
+                    {brandLoading && (
+                      <Text style={styles.dim}>
+                        프랜차이즈 불러오는 중…
+                      </Text>
+                    )}
+                    {!brandLoading && brandErr && (
+                      <Text style={{ color: "#B91C1C", fontSize: 12 }}>
+                        {brandErr}
+                      </Text>
+                    )}
+                    {!brandLoading && !brandErr && (
+                      brandList.length > 0 ? (
+                        <View style={{ marginTop: 4 }}>
+                          {brandList.slice(0, 10).map((b) => (
+                            <Text key={b.brandNm} style={styles.item}>
+                              • {b.brandNm}
+                              {b.frcsCnt != null &&
+                                ` (${b.frcsCnt}개 점포)`}
+                              {b.avrgSlsAmt != null &&
+                                ` · 평균매출 ${Number(
+                                  b.avrgSlsAmt
+                                ).toLocaleString()}원`}
                             </Text>
                           ))}
-                      </>
+                        </View>
+                      ) : (
+                        <Text style={styles.dim}>
+                          선택한 업종에 연동된 프랜차이즈 정보가 없어요.
+                        </Text>
+                      )
                     )}
-                </>
-              )}
-            </View>
-          ) : null}
-
-          {/* 🔹 분류 선택 UI (대분류 / 중분류) */}
-          {!loading && !errMsg && taxonomy && (
-            <View style={{ marginTop: 10 }}>
-              <Text style={styles.sectionTitle}>업종 필터</Text>
-
-              {/* 대분류 선택 */}
-              <Text style={styles.subTitle}>대분류 선택</Text>
-              <View style={styles.chipRow}>
-                {lOptions.map((l) => (
-                  <Chip
-                    key={l}
-                    label={l}
-                    active={selectedL === l}
-                    onPress={() => handleSelectL(l)}
-                  />
-                ))}
-                {lOptions.length === 0 && (
-                  <Text style={styles.dim}>대분류 정보가 부족합니다.</Text>
-                )}
-              </View>
-
-              {/* 중분류 선택: 대분류 선택 + 데이터 있을 때만 칩 */}
-              <Text style={styles.subTitle}>중분류 선택</Text>
-              {mOptions.length > 0 ? (
-                <View style={styles.chipRow}>
-                  {mOptions.map((m) => (
-                    <Chip
-                      key={m}
-                      label={m}
-                      active={selectedM === m}
-                      onPress={() => handleSelectM(m)}
-                    />
-                  ))}
-                </View>
-              ) : (
-                <Text style={styles.dim}>
-                  이 상권에서는 중분류 데이터가 거의 없어 대분류만 사용할 수 있어요.
-                </Text>
-              )}
-
-              <Text style={styles.dim}>
-                ※ 대/중분류를 바꾸면, 해당 계층에 속한 소분류만 추천 리스트에 보여줘요.
-              </Text>
-
-              {/* 🔹 소분류 (프랜차이즈) 리스트 */}
-              <Text style={styles.subTitle}>소분류 (프랜차이즈)</Text>
-              {brandLoading && (
-                <Text style={styles.dim}>프랜차이즈 불러오는 중…</Text>
-              )}
-              {!brandLoading && brandErr && (
-                <Text style={{ color: "#B91C1C", fontSize: 12 }}>
-                  {brandErr}
-                </Text>
-              )}
-              {!brandLoading && !brandErr && (
-                brandList.length > 0 ? (
-                  <View style={{ marginTop: 4 }}>
-                    {brandList.slice(0, 10).map((b) => (
-                      <Text key={b.brandNm} style={styles.item}>
-                        • {b.brandNm}
-                        {b.frcsCnt != null && ` (${b.frcsCnt}개 점포)`}
-                        {b.avrgSlsAmt != null &&
-                          ` · 평균매출 ${Number(
-                            b.avrgSlsAmt
-                          ).toLocaleString()}원`}
-                      </Text>
-                    ))}
                   </View>
-                ) : (
-                  <Text style={styles.dim}>
-                    선택한 업종에 연동된 프랜차이즈 정보가 없어요.
-                  </Text>
-                )
+
+                  {/* 탭 스위치 */}
+                  {effectiveTop.length > 0 && (
+                    <View style={styles.tabs}>
+                      <TabButton
+                        label="일반 창업 가능"
+                        active={activeTab === "openable"}
+                        onPress={() => setActiveTab("openable")}
+                      />
+                      <TabButton
+                        label="전문/허가 필요"
+                        active={activeTab === "licensed"}
+                        onPress={() => setActiveTab("licensed")}
+                      />
+                    </View>
+                  )}
+
+                  {/* 추천 업종 리스트 */}
+                  {effectiveTop.length > 0 && (
+                    <>
+                      <View style={styles.divider} />
+                      <Text style={styles.recoTitle}>
+                        {activeTab === "openable"
+                          ? "일반 창업 가능 (5개)"
+                          : "전문/허가 필요 (5개)"}
+                      </Text>
+
+                      {(activeTab === "openable" ? openable5 : licensed5).map(
+                        (r) => {
+                          const meta = getMeta(r.category);
+                          return (
+                            <TouchableOpacity
+                              key={r.category}
+                              onPress={() => {
+                                setSelectedCategory(r);
+                                setStep("result");
+                              }}
+                            >
+                              <Text style={styles.recoItem}>
+                                • {r.category}
+                                <Text style={styles.recoScore}>
+                                  {" "}
+                                  {typeof r.score === "number"
+                                    ? r.score.toFixed(3)
+                                    : String(r.score)}
+                                </Text>
+                                {!meta.openable && (
+                                  <Text style={styles.licenseBadge}>
+                                    {" "}
+                                    허가/자격 필요
+                                  </Text>
+                                )}
+                                {r._fromOtherGroup && (
+                                  <Text style={styles.altBadge}>
+                                    {" "}
+                                    대체추천
+                                  </Text>
+                                )}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        }
+                      )}
+
+                      {/* 필터 결과가 비어 fallback일 때 안내 문구 */}
+                      {filteredTop.length === 0 && (selectedL || selectedM) && (
+                        <Text style={[styles.dim, { marginTop: 4 }]}>
+                          선택한 대/중분류에 딱 맞는 업종은 없어서, 전체 추천
+                          기준으로 보여드리고 있어요.
+                        </Text>
+                      )}
+                    </>
+                  )}
+                </View>
               )}
-            </View>
-          )}
 
-          {/* 탭 스위치 */}
-          {!loading && !errMsg && filteredTop.length > 0 && (
-            <View style={styles.tabs}>
-              <TabButton
-                label="일반 창업 가능"
-                active={activeTab === "openable"}
-                onPress={() => setActiveTab("openable")}
-              />
-              <TabButton
-                label="전문/허가 필요"
-                active={activeTab === "licensed"}
-                onPress={() => setActiveTab("licensed")}
-              />
-            </View>
-          )}
+              {/* 3) 결과 단계 */}
+              {step === "result" && selectedCategory && (
+                <View>
+                  <Text style={styles.sectionTitle}>선택한 업종</Text>
+                  <Text style={styles.recoItem}>
+                    {selectedCategory.category} · 점수{" "}
+                    {typeof selectedCategory.score === "number"
+                      ? selectedCategory.score.toFixed(3)
+                      : String(selectedCategory.score)}
+                  </Text>
 
-          {/* 추천 업종 리스트 (탭에 따라) */}
-          {!loading && !errMsg && filteredTop.length > 0 ? (
-            <>
-              <View style={styles.divider} />
-              <Text style={styles.recoTitle}>
-                {activeTab === "openable"
-                  ? "일반 창업 가능 (5개)"
-                  : "전문/허가 필요 (5개)"}
-              </Text>
-              {renderCategoryList(
-                activeTab === "openable" ? openable5 : licensed5
+                  {whyLine && (
+                    <View style={[styles.whyBadge, { marginTop: 8 }]}>
+                      <Text style={styles.whyText}>{whyLine}</Text>
+                    </View>
+                  )}
+
+                  {d && (
+                    <>
+                      <Text style={styles.sectionTitle}>
+                        이 상권과 이 업종
+                      </Text>
+                      <Text style={styles.item}>
+                        • {d.demographics?.female?.label},{" "}
+                        {d.demographics?.age20s?.label},{" "}
+                        {d.demographics?.age30s?.label}
+                      </Text>
+                      <Text style={styles.item}>
+                        • 상권/결제:{" "}
+                        {d.commerce?.notes ||
+                          `결제강도(log) ${fmtNum(
+                            d.commerce?.pay_cnt_log
+                          )} · 상권레벨 ${fmtNum(d.commerce?.cmrcl_level)}`}
+                      </Text>
+                      {d.poi && (
+                        <Text style={styles.item}>
+                          • 업종 수 {d.poi.total ?? 0}개 · 다양도{" "}
+                          {fmtNum(d.poi.entropy)}
+                        </Text>
+                      )}
+                    </>
+                  )}
+
+                  <View
+                    style={{ marginTop: 10, flexDirection: "row", gap: 8 }}
+                  >
+                    <TouchableOpacity
+                      style={[styles.tabBtn, { flex: 1 }]}
+                      onPress={() => setStep("category")}
+                    >
+                      <Text style={styles.tabTxt}>다른 업종 보기</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.tabBtn, styles.tabBtnActive, { flex: 1 }]}
+                      onPress={() => setStep("summary")}
+                    >
+                      <Text style={styles.tabTxtActive}>상권 요약 보기</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               )}
             </>
-          ) : null}
+          )}
         </View>
       )}
 
@@ -547,28 +650,6 @@ const MapScreen = () => {
     </View>
   );
 };
-
-/** 리스트 렌더러 (한 파일 내 간단 버전) */
-function renderCategoryList(items) {
-  return items.map((r) => {
-    const meta = getMeta(r.category);
-    return (
-      <Text key={r.category} style={styles.recoItem}>
-        • {r.category}
-        <Text style={styles.recoScore}>
-          {" "}
-          {typeof r.score === "number" ? r.score.toFixed(3) : String(r.score)}
-        </Text>
-        {!meta.openable && (
-          <Text style={styles.licenseBadge}>  허가/자격 필요</Text>
-        )}
-        {r._fromOtherGroup && (
-          <Text style={styles.altBadge}>  대체추천</Text>
-        )}
-      </Text>
-    );
-  });
-}
 
 /** 카테고리 분리 */
 function partitionCategories(items = []) {
@@ -680,15 +761,26 @@ function buildDetailsFallback(rec) {
     const top0 = rec?.topCategories?.[0];
     const topCategory = top0?.category || null;
 
+    // ⚠️ 여기서는 디폴트값을 바로 0으로 주지 않고 그대로 받고,
+    // 아래에서 ?? 0 으로 치환함
     const {
-      rate_20s = 0,
-      rate_30s = 0,
-      female_rate = 0,
-      cmrcl_level = 0,
-      pay_cnt_log = 0,
-      poi_entropy = 0,
-      poi_total = 0,
+      rate_20s,
+      rate_30s,
+      female_rate,
+      cmrcl_level,
+      pay_cnt_log,
+      poi_entropy,
+      poi_total,
     } = fv;
+
+    // 값이 없을 때만 0으로 치환
+    const _rate_20s = rate_20s ?? 0;
+    const _rate_30s = rate_30s ?? 0;
+    const _female_rate = female_rate ?? 0;
+    const _cmrcl_level = cmrcl_level ?? 0;
+    const _pay_cnt_log = pay_cnt_log ?? 0;
+    const _poi_entropy = poi_entropy ?? 0;
+    const _poi_total = poi_total ?? 0;
 
     const total = Object.values(byCate).reduce((a, b) => a + b, 0) || 1;
     const same = topCategory ? byCate[topCategory] || 0 : 0;
@@ -718,34 +810,51 @@ function buildDetailsFallback(rec) {
 
     const pctLocal = (x) => `${(x * 100).toFixed(1)}%`;
 
+    // ✅ 실제로 백엔드에서 두 필드를 내려보내는지 여부 확인
+    const hasPayFields =
+      Object.prototype.hasOwnProperty.call(fv, "pay_cnt_log") &&
+      Object.prototype.hasOwnProperty.call(fv, "cmrcl_level");
+
     return {
       demographics: {
-        female: { value: female_rate, label: `여성 ${pctLocal(female_rate)}` },
-        age20s: { value: rate_20s, label: `20대 ${pctLocal(rate_20s)}` },
-        age30s: { value: rate_30s, label: `30대 ${pctLocal(rate_30s)}` },
+        female: {
+          value: _female_rate,
+          label: `여성 ${pctLocal(_female_rate)}`,
+        },
+        age20s: {
+          value: _rate_20s,
+          label: `20대 ${pctLocal(_rate_20s)}`,
+        },
+        age30s: {
+          value: _rate_30s,
+          label: `30대 ${pctLocal(_rate_30s)}`,
+        },
         flags: {
-          femaleHigh: female_rate >= TH.FEMALE_RATE_HIGH,
-          age20sHigh: rate_20s >= TH.RATE20S_HIGH,
-          age30sHigh: rate_30s >= TH.RATE30S_HIGH,
+          femaleHigh: _female_rate >= TH.FEMALE_RATE_HIGH,
+          age20sHigh: _rate_20s >= TH.RATE20S_HIGH,
+          age30sHigh: _rate_30s >= TH.RATE30S_HIGH,
         },
       },
       commerce: {
-        cmrcl_level,
-        pay_cnt_log,
+        cmrcl_level: _cmrcl_level,
+        pay_cnt_log: _pay_cnt_log,
+        // ✅ 필드가 실제로 있고 둘 다 0일 때만 "데이터 없음/부족"
         notes:
-          pay_cnt_log === 0 && cmrcl_level === 0
+          hasPayFields &&
+          _pay_cnt_log === 0 &&
+          _cmrcl_level === 0
             ? "상권(결제) 데이터 없음/부족"
             : undefined,
         flags: {
-          payHigh: pay_cnt_log >= TH.PAY_LOG_HIGH,
-          payMid: pay_cnt_log >= TH.PAY_LOG_MID,
-          lvlHigh: cmrcl_level >= TH.CMR_LEVEL_HIGH,
-          lvlMid: cmrcl_level >= TH.CMR_LEVEL_MID,
+          payHigh: _pay_cnt_log >= TH.PAY_LOG_HIGH,
+          payMid: _pay_cnt_log >= TH.PAY_LOG_MID,
+          lvlHigh: _cmrcl_level >= TH.CMR_LEVEL_HIGH,
+          lvlMid: _cmrcl_level >= TH.CMR_LEVEL_MID,
         },
       },
       poi: {
-        total: poi_total,
-        entropy: poi_entropy,
+        total: _poi_total,
+        entropy: _poi_entropy,
         topMost,
         leastCommon,
         competition: {
@@ -759,13 +868,14 @@ function buildDetailsFallback(rec) {
               ? "동일 업종 드묾"
               : "보통",
         },
-        flags: { highDiversity: poi_entropy >= TH.ENTROPY_HIGH },
+        flags: { highDiversity: _poi_entropy >= TH.ENTROPY_HIGH },
       },
     };
   } catch {
     return null;
   }
 }
+
 
 function pickGuFromFull(full) {
   if (!full) return null;
