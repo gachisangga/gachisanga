@@ -77,6 +77,15 @@ const MapScreen = () => {
   const [selectedL, setSelectedL] = useState(null); // 대분류
   const [selectedM, setSelectedM] = useState(null); // 중분류
 
+  // 대분류 선호도 (관심있음 / 없음)
+  const [interestedL, setInterestedL] = useState([]); // string[]
+  const [blockedL, setBlockedL] = useState([]); // string[]
+
+  // 검색 / 고급 필터
+  const [searchQuery, setSearchQuery] = useState("");
+  const [densityFilter, setDensityFilter] = useState("all"); // all | many | few
+  const [showAdvancedFilter, setShowAdvancedFilter] = useState(false);
+
   // 프랜차이즈
   const [brandList, setBrandList] = useState([]);
   const [brandLoading, setBrandLoading] = useState(false);
@@ -112,13 +121,13 @@ const MapScreen = () => {
       // 3) 주소명 → 행정동 코드
       const { fullDongName } = result;
       console.log("카카오에서 받은 fullDongName:", fullDongName);
-      const parts = (fullDongName || "").split(" ").filter(Boolean);
-      const dongName = parts.length ? parts[parts.length - 1] : undefined;
       const admmCd = await getAdmmCdByDong(fullDongName);
       console.log("변환된 admmCd:", admmCd);
 
       // (선택) 인구 API 조회 – 백엔드가 자체 조회하므로 없어도 동작
       if (admmCd) {
+        const parts = (fullDongName || "").split(" ").filter(Boolean);
+        const dongName = parts.length ? parts[parts.length - 1] : undefined;
         const population = await getPopulationByDong(admmCd, dongName);
         console.log("인구 데이터(프론트):", population);
       }
@@ -182,6 +191,52 @@ const MapScreen = () => {
   const mOptions =
     selectedL && MByL[selectedL] ? MByL[selectedL] : [];
 
+  // 소분류 -> 중분류 찾기
+  function findMByS(sName) {
+    for (const [m, sList] of Object.entries(SByM)) {
+      if (Array.isArray(sList) && sList.includes(sName)) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  // 중분류 -> 대분류 찾기
+  function findLByM(mName) {
+    for (const [l, mList] of Object.entries(MByL)) {
+      if (Array.isArray(mList) && mList.includes(mName)) {
+        return l;
+      }
+    }
+    return null;
+  }
+
+  // 대분류 선호도 필터
+  function allowedByInterest(lName) {
+    if (!lName) return true;
+    if (blockedL.includes(lName)) return false;
+    if (interestedL.length > 0 && !interestedL.includes(lName)) return false;
+    return true;
+  }
+
+  // 대분류 관심/비관심 토글 (길게 누르기)
+  const handleToggleInterestL = (l) => {
+    const isLiked = interestedL.includes(l);
+    const isBlocked = blockedL.includes(l);
+
+    if (!isLiked && !isBlocked) {
+      // 기본 -> 관심있음
+      setInterestedL([...interestedL, l]);
+    } else if (isLiked) {
+      // 관심있음 -> 관심없음
+      setInterestedL(interestedL.filter((x) => x !== l));
+      setBlockedL([...blockedL, l]);
+    } else if (isBlocked) {
+      // 관심없음 -> 기본
+      setBlockedL(blockedL.filter((x) => x !== l));
+    }
+  };
+
   // 대분류/중분류 선택 핸들러
   const handleSelectL = (l) => {
     const next = selectedL === l ? null : l;
@@ -201,35 +256,63 @@ const MapScreen = () => {
       return true;
     }
 
-    let mName = null;
-    for (const [m, sList] of Object.entries(SByM)) {
-      if (Array.isArray(sList) && sList.includes(sName)) {
-        mName = m;
-        break;
-      }
-    }
+    const mName = findMByS(sName);
     if (!mName) {
       if (!selectedL && !selectedM) return true;
       return false;
     }
 
-    let lName = null;
-    for (const [l, mList] of Object.entries(MByL)) {
-      if (Array.isArray(mList) && mList.includes(mName)) {
-        lName = l;
-        break;
-      }
-    }
+    const lName = findLByM(mName);
 
-    if (selectedL && lName !== selectedL) return false;
+    if (selectedL && lName && lName !== selectedL) return false;
     if (selectedM && mName !== selectedM) return false;
+
     return true;
   }
+
+  // 업종 분포 상위/하위 (details에서 가져옴)
+  const manyCateSet = React.useMemo(
+    () => new Set(d?.poi?.topMost?.map((x) => x.category) || []),
+    [d]
+  );
+  const fewCateSet = React.useMemo(
+    () => new Set(d?.poi?.leastCommon?.map((x) => x.category) || []),
+    [d]
+  );
 
   // 🔹 소분류 추천 필터
   const filteredTop = top.filter((item) => {
     const sName = item.category;
-    return belongsToSelectedBranch(sName);
+
+    // ① 대분류/중분류 드릴다운 가지 안에 속하는지
+    if (!belongsToSelectedBranch(sName)) {
+      return false;
+    }
+
+    // ② 대분류 선호도(관심있음/없음) 필터
+    const mName = findMByS(sName);
+    const lName = mName ? findLByM(mName) : null;
+    if (lName && !allowedByInterest(lName)) {
+      return false;
+    }
+
+    // ③ 업종 분포 필터 (많은 업종 / 적은 업종)
+    if (densityFilter === "many" && !manyCateSet.has(sName)) {
+      return false;
+    }
+    if (densityFilter === "few" && !fewCateSet.has(sName)) {
+      return false;
+    }
+
+    // ④ 검색 필터 (소분류명 기준)
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim();
+      if (!sName.includes(q)) {
+        return false;
+      }
+    }
+
+    return true;
   });
 
   // 🔹 필터 결과가 비면 전체 top으로 fallback
@@ -246,27 +329,14 @@ const MapScreen = () => {
     const sName = item.category;
     const score = typeof item.score === "number" ? item.score : 0;
 
-    // 소분류 → 중분류 찾기
-    let mName = null;
-    for (const [m, sList] of Object.entries(SByM)) {
-      if (Array.isArray(sList) && sList.includes(sName)) {
-        mName = m;
-        break;
-      }
-    }
+    const mName = findMByS(sName);
     if (!mName) continue;
 
+    const lName = findLByM(mName);
+    if (lName && !allowedByInterest(lName)) continue;
+
     // 선택된 대분류가 있으면, 그 L 아래에 있는 M만 인정
-    if (selectedL) {
-      let lName = null;
-      for (const [l, mList] of Object.entries(MByL)) {
-        if (Array.isArray(mList) && mList.includes(mName)) {
-          lName = l;
-          break;
-        }
-      }
-      if (lName && lName !== selectedL) continue;
-    }
+    if (selectedL && lName && lName !== selectedL) continue;
 
     midScores[mName] = (midScores[mName] || 0) + score;
   }
@@ -334,33 +404,45 @@ const MapScreen = () => {
     fetchBrands();
   }, [selectedL, selectedM]);
 
-// 🔹 선택한 L/M + taxonomy 기준으로 프랜차이즈 필터
-const filteredBrandList = brandList.filter((b) => {
-  // 1) 선택한 대분류 기준으로 taxonomy 가지 안에 있는 프랜차이즈만 허용
-  if (selectedL) {
-    const mListForSelectedL = MByL[selectedL];
+  // 🔹 선택한 L/M + taxonomy 기준으로 프랜차이즈 필터
+  const filteredBrandList = brandList.filter((b) => {
+    // 1) 선택한 대분류 기준으로 taxonomy 가지 안에 있는 프랜차이즈만 허용
+    if (selectedL) {
+      const mListForSelectedL = MByL[selectedL];
 
-    if (Array.isArray(mListForSelectedL) && b.indutyMlsfcNm) {
-      // taxonomy에 selectedL → [중분류 목록] 이 있으면
-      // 그 안에 이 브랜드의 중분류가 있을 때만 통과
-      if (!mListForSelectedL.includes(b.indutyMlsfcNm)) {
-        return false;
+      if (Array.isArray(mListForSelectedL) && b.indutyMlsfcNm) {
+        if (!mListForSelectedL.includes(b.indutyMlsfcNm)) {
+          return false;
+        }
+      } else {
+        if (b.indutyLclasNm !== selectedL) return false;
       }
-    } else {
-      // taxonomy에 selectedL 정보가 없으면 그냥 L 일치로만 필터
-      if (b.indutyLclasNm !== selectedL) return false;
     }
-  }
 
-  // 2) 선택한 중분류와 다른 프랜차이즈는 제외
-  if (selectedM && b.indutyMlsfcNm !== selectedM) return false;
+    // 2) 선택한 중분류와 다른 프랜차이즈는 제외
+    if (selectedM && b.indutyMlsfcNm !== selectedM) return false;
 
-  return true;
-});
+    // 3) 대분류 선호도(관심/비관심) 필터
+    const lName = b.indutyLclasNm;
+    if (lName && !allowedByInterest(lName)) return false;
 
-const shownBrandList =
-  selectedL || selectedM ? filteredBrandList : brandList;
+    return true;
+  });
 
+  const shownBrandList =
+    selectedL || selectedM ? filteredBrandList : brandList;
+
+  // 검색 적용된 프랜차이즈 리스트
+  const searchedBrandList = React.useMemo(() => {
+    if (!searchQuery.trim()) return shownBrandList;
+    const q = searchQuery.trim();
+    return shownBrandList.filter(
+      (b) =>
+        b.brandNm?.includes(q) ||
+        b.indutyMlsfcNm?.includes(q) ||
+        b.indutyLclasNm?.includes(q)
+    );
+  }, [shownBrandList, searchQuery]);
 
   const hasReco = !!recoData;
 
@@ -486,6 +568,103 @@ const shownBrandList =
                       </View>
                     )}
 
+                    {/* 검색 + breadcrumb + 고급필터 */}
+                    <View style={{ marginTop: 10 }}>
+                      <Text style={styles.sectionTitle}>
+                        어떤 업종을 생각 중이신가요?
+                      </Text>
+                      <TextInput
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        placeholder="업종이나 프랜차이즈 이름을 직접 검색해보세요"
+                        style={styles.searchInput}
+                      />
+
+                      {/* 단계 표시 (Breadcrumb) */}
+                      <Text style={styles.breadcrumb}>
+                        {selectedL || selectedM
+                          ? `${selectedL ?? "대분류 미선택"}${
+                              selectedM ? " > " + selectedM : ""
+                            }`
+                          : "대분류 > 중분류 > 프랜차이즈(선택)"}
+                      </Text>
+
+                      {/* 고급 필터 토글 */}
+                      <TouchableOpacity
+                        style={styles.advancedToggle}
+                        onPress={() =>
+                          setShowAdvancedFilter((prev) => !prev)
+                        }
+                      >
+                        <Text style={styles.advancedToggleText}>
+                          {showAdvancedFilter
+                            ? "고급 필터 접기"
+                            : "고급 필터 열기"}
+                        </Text>
+                      </TouchableOpacity>
+
+                      {showAdvancedFilter && (
+                        <View style={styles.advancedBox}>
+                          <Text style={styles.subTitle}>
+                            수요/매출 관련
+                          </Text>
+                          <View className={styles.chipRow}>
+                            {/* TODO: 성장률 데이터 연결 시 로직 적용 */}
+                            <Chip
+                              label="성장률 높은 업종만"
+                              active={false}
+                              onPress={() => {}}
+                            />
+                          </View>
+
+                          <Text style={styles.subTitle}>
+                            경쟁도 관련
+                          </Text>
+                          <View style={styles.chipRow}>
+                            <Chip
+                              label="많이 존재하는 업종만"
+                              active={densityFilter === "many"}
+                              onPress={() =>
+                                setDensityFilter(
+                                  densityFilter === "many"
+                                    ? "all"
+                                    : "many"
+                                )
+                              }
+                            />
+                            <Chip
+                              label="거의 없는 업종만"
+                              active={densityFilter === "few"}
+                              onPress={() =>
+                                setDensityFilter(
+                                  densityFilter === "few"
+                                    ? "all"
+                                    : "few"
+                                )
+                              }
+                            />
+                          </View>
+
+                          <Text style={styles.subTitle}>
+                            형태 관련
+                          </Text>
+                          <View style={styles.chipRow}>
+                            {/* TODO: 프랜차이즈/비프랜차이즈 구분 데이터 연결 필요 */}
+                            <Chip
+                              label="프랜차이즈만"
+                              active={false}
+                              onPress={() => {}}
+                            />
+                            <Chip
+                              label="비프랜차이즈만"
+                              active={false}
+                              onPress={() => {}}
+                            />
+                          </View>
+                        </View>
+                      )}
+                    </View>
+
                     <View style={{ marginTop: 10 }}>
                       <Text style={styles.sectionTitle}>업종 필터</Text>
 
@@ -497,7 +676,15 @@ const shownBrandList =
                             key={l}
                             label={l}
                             active={selectedL === l}
+                            status={
+                              blockedL.includes(l)
+                                ? "blocked"
+                                : interestedL.includes(l)
+                                ? "liked"
+                                : "normal"
+                            }
                             onPress={() => handleSelectL(l)}
+                            onLongPress={() => handleToggleInterestL(l)}
                           />
                         ))}
                         {lOptions.length === 0 && (
@@ -506,6 +693,10 @@ const shownBrandList =
                           </Text>
                         )}
                       </View>
+                      <Text style={styles.dim}>
+                        ※ 대분류 칩을 길게 누르면 "관심있음 → 관심없음 → 해제"
+                        로 바뀌고, 관심없는 대분류는 추천에서 제외돼요.
+                      </Text>
 
                       {/* 중분류 */}
                       <Text style={styles.subTitle}>중분류 선택</Text>
@@ -535,10 +726,10 @@ const shownBrandList =
                       {/* 프랜차이즈 추천 */}
                       <Text style={styles.subTitle}>
                         프랜차이즈 추천
-                        {shownBrandList.length > 0 &&
+                        {searchedBrandList.length > 0 &&
                           ` (TOP ${Math.min(
                             10,
-                            shownBrandList.length
+                            searchedBrandList.length
                           )})`}
                       </Text>
                       {brandLoading && (
@@ -554,9 +745,9 @@ const shownBrandList =
                         </Text>
                       )}
                       {!brandLoading && !brandErr && (
-                        shownBrandList.length > 0 ? (
+                        searchedBrandList.length > 0 ? (
                           <View style={{ marginTop: 4 }}>
-                            {shownBrandList
+                            {searchedBrandList
                               .slice(0, 10)
                               .map((b, idx) => (
                                 <Text
@@ -590,7 +781,7 @@ const shownBrandList =
                         ) : (
                           <Text style={styles.dim}>
                             {selectedL || selectedM
-                              ? "선택한 대/중분류에 정확히 일치하는 프랜차이즈가 없어요."
+                              ? "선택한 대/중분류 및 검색 조건에 맞는 프랜차이즈가 없어요."
                               : "프랜차이즈 정보가 없어요."}
                           </Text>
                         )
@@ -675,12 +866,16 @@ const shownBrandList =
                         })}
 
                         {filteredTop.length === 0 &&
-                          (selectedL || selectedM) && (
+                          (selectedL ||
+                            selectedM ||
+                            searchQuery.trim() ||
+                            densityFilter !== "all") && (
                             <Text
                               style={[styles.dim, { marginTop: 4 }]}
                             >
-                              선택한 대/중분류에 딱 맞는 업종은 없어서,
-                              전체 추천 기준으로 보여드리고 있어요.
+                              선택한 대/중분류나 필터, 검색 조건에 딱 맞는
+                              업종은 없어서, 전체 추천 기준으로 보여드리고
+                              있어요.
                             </Text>
                           )}
                       </>
@@ -840,14 +1035,31 @@ function TabButton({ label, active, onPress }) {
 }
 
 /** Chip 컴포넌트 */
-function Chip({ label, active, onPress }) {
+function Chip({ label, active, onPress, onLongPress, status }) {
+  const isLiked = status === "liked";
+  const isBlocked = status === "blocked";
+
   return (
     <TouchableOpacity
       onPress={onPress}
-      style={[styles.chip, active && styles.chipActive]}
+      onLongPress={onLongPress}
+      style={[
+        styles.chip,
+        active && styles.chipActive,
+        isLiked && !active && styles.chipLiked,
+        isBlocked && styles.chipBlocked,
+      ]}
     >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+      <Text
+        style={[
+          styles.chipText,
+          (active || isLiked) && styles.chipTextActive,
+          isBlocked && styles.chipTextBlocked,
+        ]}
+      >
         {label}
+        {isLiked && " ★"}
+        {isBlocked && " ×"}
       </Text>
     </TouchableOpacity>
   );
@@ -1144,9 +1356,53 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: "#F9FAFB",
   },
+  chipLiked: {
+    backgroundColor: "#E0F2FE",
+    borderColor: "#38BDF8",
+  },
+  chipBlocked: {
+    backgroundColor: "#F3F4F6",
+    borderColor: "#D1D5DB",
+    opacity: 0.6,
+  },
+  chipTextBlocked: {
+    color: "#9CA3AF",
+    textDecorationLine: "line-through",
+  },
   brandRank: { fontWeight: "600" },
   brandName: { fontWeight: "600" },
   brandMeta: { fontSize: 11, color: "#4B5563" },
+  searchInput: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 12,
+  },
+  breadcrumb: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "#6B7280",
+  },
+  advancedToggle: {
+    marginTop: 8,
+    paddingVertical: 6,
+  },
+  advancedToggleText: {
+    fontSize: 12,
+    color: "#2563EB",
+    fontWeight: "600",
+  },
+  advancedBox: {
+    marginTop: 4,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
 });
 
 export default MapScreen;
