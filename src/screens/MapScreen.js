@@ -9,6 +9,7 @@ import {
   Keyboard,
   ActivityIndicator,
   TouchableOpacity,
+  ScrollView, 
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { getCoordsByAddress } from "../api/kakaoApi";
@@ -153,7 +154,6 @@ const MapScreen = () => {
       console.log("추천 결과 원본:", JSON.stringify(rec, null, 2));
 
       setRecoData(rec);
-      console.log("featureVector:", recoData?.debug?.featureVector);
 
       setStep("summary"); // ✅ 검색 끝나면 상권 요약 단계 진입
     } catch (e) {
@@ -242,6 +242,11 @@ const MapScreen = () => {
   const openable5 = fillToFive(openableList, licensedList);
   const licensed5 = fillToFive(licensedList, openableList);
 
+  // 🔹 (추가) 중분류 추천 TOP 5 (소분류 점수를 중분류로 집계)
+  const midTop5 = selectedL
+    ? buildMidScores(effectiveTop, taxonomy, selectedL, 5)
+    : [];
+
   // 지도 영역
   const region = coords
     ? {
@@ -328,6 +333,9 @@ const MapScreen = () => {
       {/* 결과 패널 */}
       {(loading || errMsg || hasReco) && (
         <View style={styles.recoContainer}>
+        <ScrollView
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={true}>
           {/* 로딩 */}
           {loading && (
             <View style={styles.rowCenter}>
@@ -506,14 +514,27 @@ const MapScreen = () => {
                     </View>
                   )}
 
-                  {/* 추천 업종 리스트 */}
+                  {/* 추천 업종 리스트 (중분류 + 소분류) */}
                   {effectiveTop.length > 0 && (
                     <>
                       <View style={styles.divider} />
+
+                      {/* ✅ (1) 중분류 추천 TOP 5 (선택한 대분류 안에서) */}
+                      {selectedL && midTop5.length > 0 && (
+                        <>
+                          <Text style={styles.recoTitle}>
+                            선택한 대분류 안에서 중분류 추천 (TOP 5)
+                          </Text>
+                          {renderMidList(midTop5)}
+                          <View style={styles.divider} />
+                        </>
+                      )}
+
+                      {/* ✅ (2) 소분류 추천 TOP 5 (기존 로직 유지) */}
                       <Text style={styles.recoTitle}>
                         {activeTab === "openable"
-                          ? "일반 창업 가능 (5개)"
-                          : "전문/허가 필요 (5개)"}
+                          ? "소분류 추천 - 일반 창업 가능 (5개)"
+                          : "소분류 추천 - 전문/허가 필요 (5개)"}
                       </Text>
 
                       {(activeTab === "openable" ? openable5 : licensed5).map(
@@ -628,6 +649,7 @@ const MapScreen = () => {
               )}
             </>
           )}
+          </ScrollView>
         </View>
       )}
 
@@ -676,6 +698,66 @@ function fillToFive(primary, secondary) {
     .map((x) => ({ ...x, _fromOtherGroup: true }));
 
   return base.concat(extras);
+}
+
+/** 🔹 소분류 → 중분류 점수 집계 */
+function buildMidScores(items = [], taxonomy = {}, selectedL, limit = 5) {
+  const { MByL = {}, SByM = {} } = taxonomy;
+
+  // 소분류 → 중분류 역매핑
+  const sToM = {};
+  Object.entries(SByM).forEach(([m, sList]) => {
+    (sList || []).forEach((s) => {
+      sToM[s] = m;
+    });
+  });
+
+  // 선택한 대분류 아래 중분류만 허용
+  const allowedM =
+    selectedL && MByL[selectedL] ? new Set(MByL[selectedL]) : null;
+
+  const agg = {}; // { [mid]: { sum, count } }
+
+  for (const it of items) {
+    const sName = it.category;
+    const mName = sToM[sName];
+    if (!mName) continue;
+
+    if (allowedM && !allowedM.has(mName)) continue;
+
+    if (!agg[mName]) agg[mName] = { sum: 0, count: 0 };
+    agg[mName].sum += typeof it.score === "number" ? it.score : 0;
+    agg[mName].count += 1;
+  }
+
+  const mids = Object.entries(agg).map(([mid, { sum, count }]) => ({
+    mid,
+    score: count ? sum / count : 0,
+    count,
+  }));
+
+  return mids
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
+/** 🔹 중분류 리스트 렌더링 */
+function renderMidList(midScores) {
+  if (!midScores || midScores.length === 0) {
+    return (
+      <Text style={styles.dim}>추천할 중분류가 충분하지 않아요.</Text>
+    );
+  }
+
+  return midScores.map((m) => (
+    <Text key={m.mid} style={styles.recoItem}>
+      • {m.mid}
+      <Text style={styles.recoScore}>
+        {"  "}평균 점수 {m.score.toFixed(3)}
+      </Text>
+      <Text style={styles.dim}>{`  (소분류 ${m.count}개 기반)`}</Text>
+    </Text>
+  ));
 }
 
 /** 탭 버튼 (간단 스타일) */
@@ -876,7 +958,6 @@ function buildDetailsFallback(rec) {
   }
 }
 
-
 function pickGuFromFull(full) {
   if (!full) return null;
   const parts = full.split(" ").filter(Boolean); // 예: ["서울특별시","용산구","서계동"]
@@ -918,6 +999,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     elevation: 5,
+    maxHeight: "55%",
   },
   rowCenter: {
     flexDirection: "row",
