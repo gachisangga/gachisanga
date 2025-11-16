@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   ScrollView,
+  Modal,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { getCoordsByAddress } from "../api/kakaoApi";
@@ -94,6 +95,14 @@ const MapScreen = () => {
   // 화면 단계: idle | summary | category | result
   const [step, setStep] = useState("idle");
   const [selectedCategory, setSelectedCategory] = useState(null);
+
+  // 상권 정보 모달
+  const [poiModalVisible, setPoiModalVisible] = useState(false);
+  const [poiModalType, setPoiModalType] = useState("many"); // "many" | "few"
+
+  // 프랜차이즈 상세 모달
+  const [brandModalVisible, setBrandModalVisible] = useState(false);
+  const [selectedBrandDetail, setSelectedBrandDetail] = useState(null);
 
   const handleSearch = async () => {
     if (!address.trim() || loading) return;
@@ -543,6 +552,70 @@ const MapScreen = () => {
                           총 {d.poi?.total ?? 0}개 · 다양도(entropy){" "}
                           {fmtNum(d.poi?.entropy)}
                         </Text>
+
+                        {/* 참고용 상권 정보 카드 */}
+                        <Text style={styles.sectionTitle}>
+                          참고용 상권 정보 (필터에 영향 X)
+                        </Text>
+                        <View style={styles.infoCardRow}>
+                          {/* 많이 보이는 업종 TOP 5 카드 */}
+                          <TouchableOpacity
+                            style={styles.infoCard}
+                            onPress={() => {
+                              setPoiModalType("many");
+                              setPoiModalVisible(true);
+                            }}
+                          >
+                            <Text style={styles.infoCardTitle}>
+                              많이 보이는 업종 TOP 5
+                            </Text>
+                            {(d?.poi?.topMost || [])
+                              .slice(0, 3)
+                              .map((it) => (
+                                <Text
+                                  key={it.category}
+                                  style={styles.infoCardItem}
+                                >
+                                  • {it.category} (
+                                  {(it.share * 100).toFixed(1)}%)
+                                </Text>
+                              ))}
+                            {(d?.poi?.topMost || []).length === 0 && (
+                              <Text style={styles.infoCardEmpty}>
+                                데이터 없음
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+
+                          {/* 거의 없는 업종 TOP 5 카드 */}
+                          <TouchableOpacity
+                            style={styles.infoCard}
+                            onPress={() => {
+                              setPoiModalType("few");
+                              setPoiModalVisible(true);
+                            }}
+                          >
+                            <Text style={styles.infoCardTitle}>
+                              거의 없는 업종 TOP 5
+                            </Text>
+                            {(d?.poi?.leastCommon || [])
+                              .slice(0, 3)
+                              .map((it) => (
+                                <Text
+                                  key={it.category}
+                                  style={styles.infoCardItem}
+                                >
+                                  • {it.category} (
+                                  {(it.share * 100).toFixed(1)}%)
+                                </Text>
+                              ))}
+                            {(d?.poi?.leastCommon || []).length === 0 && (
+                              <Text style={styles.infoCardEmpty}>
+                                데이터 없음
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
                       </>
                     )}
 
@@ -608,7 +681,7 @@ const MapScreen = () => {
                           <Text style={styles.subTitle}>
                             수요/매출 관련
                           </Text>
-                          <View className={styles.chipRow}>
+                          <View style={styles.chipRow}>
                             {/* TODO: 성장률 데이터 연결 시 로직 적용 */}
                             <Chip
                               label="성장률 높은 업종만"
@@ -750,32 +823,37 @@ const MapScreen = () => {
                             {searchedBrandList
                               .slice(0, 10)
                               .map((b, idx) => (
-                                <Text
+                                <TouchableOpacity
                                   key={`${b.brandNm}-${idx}`}
-                                  style={styles.item}
+                                  onPress={() => {
+                                    setSelectedBrandDetail(b);
+                                    setBrandModalVisible(true);
+                                  }}
                                 >
-                                  <Text style={styles.brandRank}>
-                                    {idx + 1}.
-                                  </Text>{" "}
-                                  <Text style={styles.brandName}>
-                                    {b.brandNm}
+                                  <Text style={styles.item}>
+                                    <Text style={styles.brandRank}>
+                                      {idx + 1}.
+                                    </Text>{" "}
+                                    <Text style={styles.brandName}>
+                                      {b.brandNm}
+                                    </Text>
+                                    {b.frcsCnt != null && (
+                                      <Text style={styles.brandMeta}>
+                                        {"  · 가맹점 "}
+                                        {b.frcsCnt}개
+                                      </Text>
+                                    )}
+                                    {b.avrgSlsAmt != null && (
+                                      <Text style={styles.brandMeta}>
+                                        {"  · 평균 매출 "}
+                                        {Number(
+                                          b.avrgSlsAmt
+                                        ).toLocaleString()}
+                                        원
+                                      </Text>
+                                    )}
                                   </Text>
-                                  {b.frcsCnt != null && (
-                                    <Text style={styles.brandMeta}>
-                                      {"  · 가맹점 "}
-                                      {b.frcsCnt}개
-                                    </Text>
-                                  )}
-                                  {b.avrgSlsAmt != null && (
-                                    <Text style={styles.brandMeta}>
-                                      {"  · 평균 매출 "}
-                                      {Number(
-                                        b.avrgSlsAmt
-                                      ).toLocaleString()}
-                                      원
-                                    </Text>
-                                  )}
-                                </Text>
+                                </TouchableOpacity>
                               ))}
                           </View>
                         ) : (
@@ -989,6 +1067,114 @@ const MapScreen = () => {
           disabled={loading}
         />
       </View>
+
+      {/* 상권 정보 상세 모달 */}
+      <Modal
+        visible={poiModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPoiModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>
+              {poiModalType === "many"
+                ? "이 지역에서 많이 보이는 업종 TOP 5"
+                : "이 지역에서 거의 없는 업종 TOP 5"}
+            </Text>
+            <Text style={styles.modalSub}>
+              이 정보는 참고용 상권 정보이며, 추천/필터에 직접적인 영향을 주지
+              않습니다.
+            </Text>
+
+            <ScrollView style={{ maxHeight: 240 }}>
+              {(poiModalType === "many"
+                ? d?.poi?.topMost || []
+                : d?.poi?.leastCommon || []
+              ).map((it) => (
+                <View key={it.category} style={styles.modalItemRow}>
+                  <Text style={styles.modalItemName}>{it.category}</Text>
+                  <Text style={styles.modalItemMeta}>
+                    점포 수 {it.count}개 · 점유율 {(it.share * 100).toFixed(1)}%
+                    {/* TODO: 서울 평균 대비 값이 서버에서 내려오면 여기에 "서울 평균의 x배" 추가 */}
+                  </Text>
+                </View>
+              ))}
+
+              {((poiModalType === "many"
+                ? d?.poi?.topMost
+                : d?.poi?.leastCommon) || []
+              ).length === 0 && (
+                <Text style={styles.infoCardEmpty}>데이터가 없습니다.</Text>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.tabBtn, { marginTop: 12 }]}
+              onPress={() => setPoiModalVisible(false)}
+            >
+              <Text style={styles.tabTxt}>닫기</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 프랜차이즈 상세 모달 */}
+      <Modal
+        visible={brandModalVisible && !!selectedBrandDetail}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setBrandModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalBox}>
+            {selectedBrandDetail && (
+              <>
+                <Text style={styles.modalTitle}>
+                  {selectedBrandDetail.brandNm}
+                </Text>
+                <Text style={styles.modalSub}>
+                  {selectedBrandDetail.indutyLclasNm} &gt;{" "}
+                  {selectedBrandDetail.indutyMlsfcNm}
+                </Text>
+
+                {/* 기본 정보 */}
+                <View style={{ marginTop: 8 }}>
+                  {selectedBrandDetail.frcsCnt != null && (
+                    <Text style={styles.modalItemMeta}>
+                      • 가맹점 수: {selectedBrandDetail.frcsCnt}개
+                    </Text>
+                  )}
+                  {selectedBrandDetail.avrgSlsAmt != null && (
+                    <Text style={styles.modalItemMeta}>
+                      • 평균 매출:{" "}
+                      {Number(
+                        selectedBrandDetail.avrgSlsAmt
+                      ).toLocaleString()}
+                      원
+                    </Text>
+                  )}
+                </View>
+
+                {/* 추천 이유 */}
+                <Text style={[styles.sectionTitle, { marginTop: 12 }]}>
+                  왜 이 프랜차이즈를 추천했나요?
+                </Text>
+                <Text style={styles.modalReason}>
+                  {buildBrandWhy(selectedBrandDetail, d)}
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.tabBtn, { marginTop: 12 }]}
+                  onPress={() => setBrandModalVisible(false)}
+                >
+                  <Text style={styles.tabTxt}>닫기</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1230,6 +1416,64 @@ function buildDetailsFallback(rec) {
   }
 }
 
+/** 프랜차이즈 추천 이유 설명 */
+function buildBrandWhy(brand, details) {
+  if (!brand || !details) {
+    return "이 상권의 인구·소비·업종 분포를 종합적으로 고려해 추천된 프랜차이즈입니다.";
+  }
+
+  const mName = brand.indutyMlsfcNm || "해당 업종";
+  const flags = details.demographics?.flags || {};
+  const commerceFlags = details.commerce?.flags || {};
+  const poiInfo = details.poi || {};
+
+  const parts = [];
+
+  // 인구 특성
+  const demoTexts = [];
+  if (flags.age20sHigh) demoTexts.push("20대 비중이 높은 상권");
+  if (flags.age30sHigh) demoTexts.push("30대 비중이 높은 상권");
+  if (flags.femaleHigh) demoTexts.push("여성 비중이 높은 상권");
+  if (demoTexts.length > 0) {
+    parts.push(demoTexts.join(" · "));
+  }
+
+  // 상권/결제 특성
+  if (commerceFlags.payHigh || commerceFlags.lvlHigh) {
+    parts.push("결제 활동과 상권 활력이 모두 높은 지역");
+  } else if (commerceFlags.payMid || commerceFlags.lvlMid) {
+    parts.push("결제 활동과 상권 활력이 보통 이상인 지역");
+  }
+
+  // 업종 분포
+  if (poiInfo.competition?.label === "동일 업종 드묾") {
+    if (poiInfo.competition.topCategory) {
+      parts.push(
+        `${poiInfo.competition.topCategory} 업종이 상대적으로 드문 편`
+      );
+    } else {
+      parts.push("해당 업종 계열 점포가 상대적으로 드문 편");
+    }
+  } else if (poiInfo.competition?.label === "동일 업종 과밀") {
+    if (poiInfo.competition.topCategory) {
+      parts.push(
+        `${poiInfo.competition.topCategory} 업종이 이미 많은 편`
+      );
+    } else {
+      parts.push("해당 업종 계열 점포가 이미 많은 편");
+    }
+  }
+
+  const head =
+    parts.length > 0
+      ? `이 상권은 ${parts.join(", ")}입니다.`
+      : "이 상권의 인구·소비·업종 분포를 기반으로 분석했습니다.";
+
+  const tail = `이러한 상권 특성에 비춰볼 때, ${mName} 계열 프랜차이즈인 「${brand.brandNm}」는 이 지역에서 수요를 확보할 가능성이 높아 추천되었습니다.`;
+
+  return `${head}\n\n${tail}`;
+}
+
 function pickGuFromFull(full) {
   if (!full) return null;
   const parts = full.split(" ").filter(Boolean);
@@ -1301,15 +1545,15 @@ const styles = StyleSheet.create({
   tabBtnActive: { backgroundColor: "white", elevation: 2 },
   tabTxt: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
   tabTxtActive: { color: "#111827" },
-  sectionTitle: { marginTop: 10, fontWeight: "700" },
-  subTitle: { marginTop: 6, fontWeight: "600" },
+  sectionTitle: { marginTop: 10, fontWeight: "700", fontSize: 13 },
+  subTitle: { marginTop: 6, fontWeight: "600", fontSize: 12 },
   item: { fontSize: 12, color: "#111", marginTop: 2 },
   divider: {
     height: 1,
     backgroundColor: "#E5E7EB",
     marginVertical: 8,
   },
-  recoTitle: { fontWeight: "700", marginBottom: 6 },
+  recoTitle: { fontWeight: "700", marginBottom: 6, fontSize: 13 },
   recoItem: { fontSize: 14, marginVertical: 2 },
   recoScore: { color: "#666", fontSize: 12 },
   licenseBadge: {
@@ -1402,6 +1646,73 @@ const styles = StyleSheet.create({
     backgroundColor: "#F9FAFB",
     borderWidth: 1,
     borderColor: "#E5E7EB",
+  },
+  infoCardRow: {
+    flexDirection: "row",
+    marginTop: 6,
+    gap: 8,
+  },
+  infoCard: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  infoCardTitle: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  infoCardItem: {
+    fontSize: 11,
+    color: "#4B5563",
+  },
+  infoCardEmpty: {
+    fontSize: 11,
+    color: "#9CA3AF",
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  modalBox: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "white",
+    borderRadius: 12,
+    padding: 16,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  modalSub: {
+    fontSize: 11,
+    color: "#6B7280",
+    marginBottom: 8,
+  },
+  modalItemRow: {
+    marginTop: 6,
+  },
+  modalItemName: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  modalItemMeta: {
+    fontSize: 11,
+    color: "#4B5563",
+  },
+  modalReason: {
+    fontSize: 12,
+    color: "#111827",
+    marginTop: 4,
+    lineHeight: 18,
   },
 });
 
