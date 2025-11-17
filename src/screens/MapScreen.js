@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   ScrollView,
-  Modal,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
 import { getCoordsByAddress } from "../api/kakaoApi";
@@ -100,18 +99,31 @@ const MapScreen = () => {
   const [step, setStep] = useState("idle");
   const [selectedCategory, setSelectedCategory] = useState(null);
 
-  // 상권 정보 모달
+  // 상권 정보 모달 (오버레이)
   const [poiModalVisible, setPoiModalVisible] = useState(false);
   const [poiModalType, setPoiModalType] = useState("many"); // "many" | "few"
 
-  // 프랜차이즈 상세 모달 (C/B 시나리오 등에서 사용)
+  // 프랜차이즈 상세 모달 (C/B 시나리오 등에서 사용, 오버레이)
   const [brandModalVisible, setBrandModalVisible] = useState(false);
-  const [selectedBrandDetail, setSelectedBrandDetail] =
-    useState(null);
+  const [selectedBrandDetail, setSelectedBrandDetail] = useState(null);
+
+  // 👉 추천 패널 표시 여부
+  const [panelVisible, setPanelVisible] = useState(false);
 
   // 🔹 앱 전체 단계 + 시나리오 (A/B/C)
   const [appStep, setAppStep] = useState("location"); // "location" | "scenario" | "flow"
   const [scenario, setScenario] = useState(null); // "A" | "B" | "C" | null
+
+  // 🔹 프랜차이즈 모달 열기/닫기 헬퍼
+  const openBrandModal = (brand) => {
+    setSelectedBrandDetail(brand);
+    setBrandModalVisible(true);
+  };
+
+  const closeBrandModal = () => {
+    setBrandModalVisible(false);
+    setSelectedBrandDetail(null);
+  };
 
   const handleSearch = async () => {
     if (!address.trim() || loading) return;
@@ -123,6 +135,7 @@ const MapScreen = () => {
     setScenario(null);
     setSelectedBrandA(null);
     setBrandSearchQueryA("");
+    setPanelVisible(true); // 검색 시작 시 패널 열기
     Keyboard.dismiss();
 
     try {
@@ -529,12 +542,24 @@ const MapScreen = () => {
       </MapView>
 
       {/* 결과 패널 */}
-      {(loading || errMsg || hasReco) && (
+      {(loading || panelVisible) && (
         <View style={styles.recoContainer}>
           <ScrollView
             nestedScrollEnabled
             showsVerticalScrollIndicator={true}
           >
+            {/* 패널 헤더 + 닫기 버튼 */}
+            <View style={styles.recoHeader}>
+              <TouchableOpacity
+                onPress={() => setPanelVisible(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={{ marginLeft: "auto" }}   // 오른쪽 정렬
+              >
+                <Text style={styles.recoHeaderClose}>닫기 ✕</Text>
+              </TouchableOpacity>
+            </View>
+
+
             {/* 로딩 */}
             {loading && (
               <View style={styles.rowCenter}>
@@ -1033,16 +1058,6 @@ const MapScreen = () => {
                                 프랜차이즈 불러오는 중…
                               </Text>
                             )}
-                            {!brandLoading && brandErr && (
-                              <Text
-                                style={{
-                                  color: "#B91C1C",
-                                  fontSize: 12,
-                                }}
-                              >
-                                {brandErr}
-                              </Text>
-                            )}
                             {!brandLoading && !brandErr && (
                               brandListForB.length > 0 ? (
                                 <View style={{ marginTop: 4 }}>
@@ -1051,13 +1066,9 @@ const MapScreen = () => {
                                     .map((b, idx) => (
                                       <TouchableOpacity
                                         key={`${b.brandNm}-${idx}`}
-                                        onPress={() => {
-                                          // A 시나리오와 같은 브랜드 상세 모달 사용
-                                          setSelectedBrandDetail(b);
-                                          setBrandModalVisible(
-                                            true
-                                          );
-                                        }}
+                                        onPress={() =>
+                                          openBrandModal(b)
+                                        }
                                       >
                                         <Text style={styles.item}>
                                           <Text
@@ -1104,6 +1115,16 @@ const MapScreen = () => {
                                   정보가 없습니다.
                                 </Text>
                               )
+                            )}
+                            {!brandLoading && brandErr && (
+                              <Text
+                                style={{
+                                  color: "#B91C1C",
+                                  fontSize: 12,
+                                }}
+                              >
+                                {brandErr}
+                              </Text>
                             )}
                           </View>
                         ) : (
@@ -1492,14 +1513,9 @@ const MapScreen = () => {
                                       .map((b, idx) => (
                                         <TouchableOpacity
                                           key={`${b.brandNm}-${idx}`}
-                                          onPress={() => {
-                                            setSelectedBrandDetail(
-                                              b
-                                            );
-                                            setBrandModalVisible(
-                                              true
-                                            );
-                                          }}
+                                          onPress={() =>
+                                            openBrandModal(b)
+                                          }
                                         >
                                           <Text style={styles.item}>
                                             <Text
@@ -1847,20 +1863,24 @@ const MapScreen = () => {
         />
       </View>
 
-      {/* 상권 정보 상세 모달 */}
-      <Modal
-        visible={poiModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPoiModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
+      {/* 상권 정보 상세 오버레이 */}
+      {poiModalVisible && (
+        <View style={styles.fullscreenOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>
-              {poiModalType === "many"
-                ? "이 지역에서 많이 보이는 업종 TOP 5"
-                : "이 지역에서 거의 없는 업종 TOP 5"}
-            </Text>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>
+                {poiModalType === "many"
+                  ? "이 지역에서 많이 보이는 업종 TOP 5"
+                  : "이 지역에서 거의 없는 업종 TOP 5"}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setPoiModalVisible(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
             <Text style={styles.modalSub}>
               이 정보는 참고용 상권 정보이며, 추천/필터에 직접적인 영향을
               주지 않습니다.
@@ -1903,70 +1923,69 @@ const MapScreen = () => {
             </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      )}
 
-      {/* 프랜차이즈 상세 모달 (B/C 시나리오용) */}
-      <Modal
-        visible={brandModalVisible && !!selectedBrandDetail}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setBrandModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
+      {/* 프랜차이즈 상세 오버레이 (B/C 시나리오용) */}
+      {brandModalVisible && selectedBrandDetail && (
+        <View style={styles.fullscreenOverlay}>
           <View style={styles.modalBox}>
-            {selectedBrandDetail && (
-              <>
-                <Text style={styles.modalTitle}>
-                  {selectedBrandDetail.brandNm}
-                </Text>
-                <Text style={styles.modalSub}>
-                  {selectedBrandDetail.indutyLclasNm} &gt;{" "}
-                  {selectedBrandDetail.indutyMlsfcNm}
-                </Text>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>
+                {selectedBrandDetail.brandNm}
+              </Text>
+              <TouchableOpacity
+                onPress={closeBrandModal}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
 
-                {/* 기본 정보 */}
-                <View style={{ marginTop: 8 }}>
-                  {selectedBrandDetail.frcsCnt != null && (
-                    <Text style={styles.modalItemMeta}>
-                      • 가맹점 수:{" "}
-                      {selectedBrandDetail.frcsCnt}개
-                    </Text>
-                  )}
-                  {selectedBrandDetail.avrgSlsAmt != null && (
-                    <Text style={styles.modalItemMeta}>
-                      • 평균 매출:{" "}
-                      {Number(
-                        selectedBrandDetail.avrgSlsAmt
-                      ).toLocaleString()}
-                      원
-                    </Text>
-                  )}
-                </View>
+            <Text style={styles.modalSub}>
+              {selectedBrandDetail.indutyLclasNm} &gt;{" "}
+              {selectedBrandDetail.indutyMlsfcNm}
+            </Text>
 
-                {/* 추천 이유 */}
-                <Text
-                  style={[
-                    styles.sectionTitle,
-                    { marginTop: 12 },
-                  ]}
-                >
-                  왜 이 프랜차이즈를 추천했나요?
+            {/* 기본 정보 */}
+            <View style={{ marginTop: 8 }}>
+              {selectedBrandDetail.frcsCnt != null && (
+                <Text style={styles.modalItemMeta}>
+                  • 가맹점 수: {selectedBrandDetail.frcsCnt}개
                 </Text>
-                <Text style={styles.modalReason}>
-                  {buildBrandWhy(selectedBrandDetail, d)}
+              )}
+              {selectedBrandDetail.avrgSlsAmt != null && (
+                <Text style={styles.modalItemMeta}>
+                  • 평균 매출:{" "}
+                  {Number(
+                    selectedBrandDetail.avrgSlsAmt
+                  ).toLocaleString()}
+                  원
                 </Text>
+              )}
+            </View>
 
-                <TouchableOpacity
-                  style={[styles.tabBtn, { marginTop: 12 }]}
-                  onPress={() => setBrandModalVisible(false)}
-                >
-                  <Text style={styles.tabTxt}>닫기</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            {/* 추천 이유 */}
+            <Text
+              style={[
+                styles.sectionTitle,
+                { marginTop: 12 },
+              ]}
+            >
+              왜 이 프랜차이즈를 추천했나요?
+            </Text>
+            <Text style={styles.modalReason}>
+              {buildBrandWhy(selectedBrandDetail, d)}
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.tabBtn, { marginTop: 12 }]}
+              onPress={closeBrandModal}
+            >
+              <Text style={styles.tabTxt}>닫기</Text>
+            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      )}
     </View>
   );
 };
@@ -2390,6 +2409,22 @@ const styles = StyleSheet.create({
     elevation: 5,
     maxHeight: "60%",
   },
+  recoHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  recoHeaderTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  recoHeaderClose: {
+    fontSize: 12,
+    color: "#6B7280",
+    fontWeight: "600",
+  },
   rowCenter: {
     flexDirection: "row",
     alignItems: "center",
@@ -2551,12 +2586,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#9CA3AF",
   },
-  modalBackdrop: {
-    flex: 1,
+  fullscreenOverlay: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.35)",
     justifyContent: "center",
     alignItems: "center",
     padding: 16,
+    zIndex: 999,
   },
   modalBox: {
     width: "100%",
@@ -2565,10 +2601,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
   },
+  modalHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
   modalTitle: {
     fontSize: 16,
     fontWeight: "700",
-    marginBottom: 4,
+  },
+  modalCloseText: {
+    fontSize: 16,
+    color: "#6B7280",
+    fontWeight: "600",
   },
   modalSub: {
     fontSize: 11,
