@@ -63,12 +63,19 @@ const MapScreen = () => {
   const [address, setAddress] = useState("");
   const [coords, setCoords] = useState(null);
 
+  // 🔹 주변 상가(POI) 그대로 저장 → 프랜차이즈 추천에 사용
+  const [storePois, setStorePois] = useState([]);
+
   // 전체 응답 저장 (topCategories + why + debug)
   const [recoData, setRecoData] = useState(null);
+
+  // 🔹 브랜드별 추천 결과 캐시 (brandNm → 추천 결과)
+  const [brandRecoCache, setBrandRecoCache] = useState({});
 
   // UX
   const [loading, setLoading] = useState(false);
   const [errMsg, setErrMsg] = useState(null);
+
 
   // 탭(일반/허가) 스위치
   const [activeTab, setActiveTab] = useState("openable"); // "openable" | "licensed"
@@ -116,10 +123,98 @@ const MapScreen = () => {
 
 
   
+    // 🔹 특정 브랜드에 대한 추천 점수/이유를 백엔드에서 가져오는 헬퍼
+  const loadBrandReco = async (brand) => {
+    try {
+      // 기본 정보 없으면 스킵
+      if (!brand?.indutyLclasNm || !brand?.indutyMlsfcNm) return;
+      if (!coords || !storePois.length || !recoData) return;
+
+      const cacheKey = brand.brandNm;
+      // 이미 캐시에 있으면 바로 merge만
+      if (brandRecoCache[cacheKey]) {
+        setSelectedBrandDetail((prev) =>
+          prev && prev.brandNm === brand.brandNm
+            ? { ...prev, ...brandRecoCache[cacheKey] }
+            : prev
+        );
+        return;
+      }
+
+      setBrandLoading(true);
+
+      const inputs = recoData?.debug?.inputs || {};
+      const fv = recoData?.debug?.featureVector || {};
+
+              const body = {
+        lat: coords.latitude,
+        lng: coords.longitude,
+        l: brand.indutyLclasNm,       // 대분류 (예: "음식")
+        m: brand.indutyMlsfcNm,       // 중분류 (예: "일식")
+        radius: fv.radius || 300,
+        pois: storePois,
+        topK: 20,
+        year: "2024",
+      };
+
+      // admmCd / areaCd는 값 있을 때만 붙이기
+      if (inputs.admmCd) {
+        body.admmCd = inputs.admmCd;
+      }
+      if (inputs.resolvedAreaCd || inputs.areaCdFromClient) {
+        body.areaCd = inputs.resolvedAreaCd || inputs.areaCdFromClient;
+      }
+
+
+
+      const res = await fetch(`${RECO_API_BASE}/brands/recommendations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const json = await res.json();
+      const matched =
+        (json.brands || []).find((b) => b.brandNm === brand.brandNm) || null;
+
+      if (matched) {
+        // 캐시에 저장
+        setBrandRecoCache((prev) => ({
+          ...prev,
+          [cacheKey]: matched,
+        }));
+
+        // 현재 선택된 상세에 merge
+        setSelectedBrandDetail((prev) =>
+          prev && prev.brandNm === brand.brandNm
+            ? { ...prev, ...matched }
+            : prev
+        );
+
+        // A 시나리오에서 선택된 브랜드도 업데이트
+        setSelectedBrandA((prev) =>
+          prev && prev.brandNm === brand.brandNm
+            ? { ...prev, ...matched }
+            : prev
+        );
+      }
+    } catch (e) {
+      console.log("브랜드 추천 점수/이유 조회 실패:", e);
+    } finally {
+      setBrandLoading(false);
+    }
+  };
+
   // 🔹 프랜차이즈 모달 열기/닫기 헬퍼
   const openBrandModal = (brand) => {
     setSelectedBrandDetail(brand);
     setBrandModalVisible(true);
+    // 백엔드에서 추천 이유 가져오기
+    loadBrandReco(brand);
   };
 
   const closeBrandModal = () => {
@@ -127,100 +222,117 @@ const MapScreen = () => {
     setSelectedBrandDetail(null);
   };
 
+
   const handleSearch = async () => {
-    if (!address.trim() || loading) return;
-    setErrMsg(null);
-    setLoading(true);
+  if (!address.trim() || loading) return;
+  setErrMsg(null);
+  setLoading(true);
+  setStep("idle");
+  setSelectedCategory(null);
+  setAppStep("location");
+  setScenario(null);
+  setSelectedBrandA(null);
+  setBrandSearchQueryA("");
+  setPanelVisible(true); // 검색 시작 시 패널 열기
+  Keyboard.dismiss();
+
+  try {
+    // 1) 주소 → 좌표
+    const result = await getCoordsByAddress(address);
+    console.log("검색 결과:", result);
+    if (!result) {
+      setErrMsg("주소를 찾지 못했습니다.");
+      setLoading(false);
+      return;
+    }
+    setCoords(result);
+
+    // 2) 반경 내 상가 조회
+    const stores = await getStoresInRadius(result);
+    console.log("주변 상가 리스트:", stores);
+    setStorePois(stores);   // ✅ 프랜차이즈 추천용으로 state에 저장
+
+
+    // 3) 주소명 → 행정동 코드
+    const { fullDongName } = result;
+    console.log("카카오에서 받은 fullDongName:", fullDongName);
+    const admmCd = await getAdmmCdByDong(fullDongName);
+    console.log("변환된 admmCd:", admmCd);
+
+    // (선택) 인구 API 조회 – 백엔드가 자체 조회하므로 없어도 동작
+    if (admmCd) {
+      const parts = (fullDongName || "").split(" ").filter(Boolean);
+      const dongName = parts.length ? parts[parts.length - 1] : undefined;
+      const population = await getPopulationByDong(admmCd, dongName);
+      console.log("인구 데이터(프론트):", population);
+    }
+
+    // 4) 추천 API 호출
+    const kakaoAddrObj = {
+      x: String(result.longitude),
+      y: String(result.latitude),
+      b_code: undefined,
+      region_2depth_name: pickGuFromFull(fullDongName),
+    };
+
+    let payload = buildRecommendPayload({
+      kakaoAddr: kakaoAddrObj,
+      storesResp: stores,
+      areaCd: undefined,
+      topK: 10,
+    });
+
+    let targetCate = null;
+    if (selectedM) {
+      targetCate = { level: "M", name: selectedM };
+    } else if (selectedL) {
+      targetCate = { level: "L", name: selectedL };
+    }
+    if (targetCate) {
+      payload = { ...payload, targetCate };
+    }
+
+    // 🔍 디버깅용: 최종 payload 확인
+    console.log("추천 API payload:", JSON.stringify(payload, null, 2));
+
+    // ⏱ 추천 API 호출 시간 측정
+    console.time("추천 API");
+    let rec;
+    try {
+      rec = await fetchRecommendations(payload);
+    } finally {
+      // ✅ 성공/실패 상관없이 항상 타이머 종료
+      console.timeEnd("추천 API");
+    }
+
+    console.log("추천 결과 원본:", JSON.stringify(rec, null, 2));
+    console.log(
+      "areaSummary.population.ageBands =",
+      JSON.stringify(rec?.debug?.areaSummary?.population?.ageBands, null, 2)
+    );
+
+    setRecoData(rec);
+    setStep("summary"); // 기본 요약
+    setAppStep("scenario"); // 위치 분석 후 → 시나리오 선택
+  } catch (e) {
+    // 🔍 에러 상세 로그
+    console.warn("추천 호출 실패 전체 error:", e);
+    console.warn("추천 호출 실패 name/message:", e?.name, e?.message);
+    if (e?.stack) {
+      console.warn("추천 호출 실패 stack:", e.stack);
+    }
+
+    setErrMsg(e?.message || "요청 중 오류가 발생했습니다.");
+    setRecoData(null);
     setStep("idle");
-    setSelectedCategory(null);
     setAppStep("location");
     setScenario(null);
-    setSelectedBrandA(null);
-    setBrandSearchQueryA("");
-    setPanelVisible(true); // 검색 시작 시 패널 열기
-    Keyboard.dismiss();
-
-    try {
-      // 1) 주소 → 좌표
-      const result = await getCoordsByAddress(address);
-      console.log("검색 결과:", result);
-      if (!result) {
-        setErrMsg("주소를 찾지 못했습니다.");
-        setLoading(false);
-        return;
-      }
-      setCoords(result);
-
-      // 2) 반경 내 상가 조회
-      const stores = await getStoresInRadius(result);
-      console.log("주변 상가 리스트:", stores);
-
-      // 3) 주소명 → 행정동 코드
-      const { fullDongName } = result;
-      console.log("카카오에서 받은 fullDongName:", fullDongName);
-      const admmCd = await getAdmmCdByDong(fullDongName);
-      console.log("변환된 admmCd:", admmCd);
+  } finally {
+    setLoading(false);
+  }
+};
 
 
-
-      // (선택) 인구 API 조회 – 백엔드가 자체 조회하므로 없어도 동작
-      if (admmCd) {
-        const parts = (fullDongName || "").split(" ").filter(Boolean);
-        const dongName = parts.length
-          ? parts[parts.length - 1]
-          : undefined;
-        const population = await getPopulationByDong(
-          admmCd,
-          dongName
-        );
-        console.log("인구 데이터(프론트):", population);
-      }
-
-      // 4) 추천 API 호출
-      const kakaoAddrObj = {
-        x: String(result.longitude),
-        y: String(result.latitude),
-        b_code: undefined,
-        region_2depth_name: pickGuFromFull(fullDongName),
-      };
-
-      let payload = buildRecommendPayload({
-        kakaoAddr: kakaoAddrObj,
-        storesResp: stores,
-        areaCd: undefined,
-        topK: 10,
-      });
-
-      let targetCate = null;
-      if (selectedM) {
-        targetCate = { level: "M", name: selectedM };
-      } else if (selectedL) {
-        targetCate = { level: "L", name: selectedL };
-      }
-      if (targetCate) {
-        payload = { ...payload, targetCate };
-      }
-
-      const rec = await fetchRecommendations(payload);
-      console.log("추천 결과 원본:", JSON.stringify(rec, null, 2));
-      console.log(
-  "areaSummary.population.ageBands =",
-  JSON.stringify(recoData?.debug?.areaSummary?.population?.ageBands, null, 2)
-);
-      setRecoData(rec);
-      setStep("summary"); // 기본 요약
-      setAppStep("scenario"); // 위치 분석 후 → 시나리오 선택
-    } catch (e) {
-      console.warn("추천 호출 실패:", e?.message ?? e);
-      setErrMsg(e?.message || "요청 중 오류가 발생했습니다.");
-      setRecoData(null);
-      setStep("idle");
-      setAppStep("location");
-      setScenario(null);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Why 라인/상세
   // Why 라인/상세
@@ -462,7 +574,7 @@ const storeSummary =
         const qs = new URLSearchParams();
         if (selectedL) qs.append("l", selectedL);
         if (selectedM) qs.append("m", selectedM);
-        qs.append("year", "2023");
+        qs.append("year", "2024");
 
         const res = await fetch(
           `${RECO_API_BASE}/brands/by-category?${qs.toString()}`
@@ -876,8 +988,10 @@ const storeSummary =
                                       key={`${b.brandNm}-${idx}`}
                                       onPress={() => {
                                         setSelectedBrandA(b);
+                                        loadBrandReco(b);   // ✅ A 시나리오 상세에도 백엔드 이유 붙이기
                                       }}
                                     >
+
                                       <Text style={styles.item}>
                                         <Text style={styles.brandRank}>
                                           {idx + 1}.
@@ -1003,8 +1117,16 @@ const storeSummary =
                               왜 이 상권에서 이 브랜드인가요?
                             </Text>
                             <Text style={styles.modalReason}>
-                              {buildBrandWhy(selectedBrandA, d)}
+                              {selectedBrandA?.whyLine
+                                ? `${selectedBrandA.whyLine}\n\n${
+                                    (selectedBrandA.reasons || [])
+                                      .map((r) => `• ${r}`)
+                                      .join("\n")
+                                  }`
+                                : buildBrandWhy(selectedBrandA, d)}
                             </Text>
+
+
 
                             {/* 하단 액션 버튼들 */}
                             <View
@@ -2071,17 +2193,25 @@ const storeSummary =
             </View>
 
             {/* 추천 이유 */}
-            <Text
-              style={[
-                styles.sectionTitle,
-                { marginTop: 12 },
-              ]}
-            >
-              왜 이 프랜차이즈를 추천했나요?
-            </Text>
-            <Text style={styles.modalReason}>
-              {buildBrandWhy(selectedBrandDetail, d)}
-            </Text>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { marginTop: 12 },
+                ]}
+              >
+                왜 이 프랜차이즈를 추천했나요?
+              </Text>
+              <Text style={styles.modalReason}>
+                {selectedBrandDetail?.whyLine
+                  ? `${selectedBrandDetail.whyLine}\n\n${
+                      (selectedBrandDetail.reasons || [])
+                        .map((r) => `• ${r}`)
+                        .join("\n")
+                    }`
+                  : buildBrandWhy(selectedBrandDetail, d)}
+              </Text>
+
+
 
             <TouchableOpacity
               style={[styles.tabBtn, { marginTop: 12 }]}
