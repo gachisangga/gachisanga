@@ -72,13 +72,16 @@ const MapScreen = () => {
   // 🔹 브랜드별 추천 결과 캐시 (brandNm → 추천 결과)
   const [brandRecoCache, setBrandRecoCache] = useState({});
 
-  // UX
+    // UX
   const [loading, setLoading] = useState(false);
   const [errMsg, setErrMsg] = useState(null);
 
+  // 🔹 추천 전략: "trend"(인기/트렌드) | "gap"(틈새/공백)
+  const [strategy, setStrategy] = useState("gap");
 
   // 탭(일반/허가) 스위치
   const [activeTab, setActiveTab] = useState("openable"); // "openable" | "licensed"
+
 
   // 사용자 분류 선택 (대/중분류)
   const [selectedL, setSelectedL] = useState(null); // 대분류
@@ -143,10 +146,10 @@ const MapScreen = () => {
 
       setBrandLoading(true);
 
-      const inputs = recoData?.debug?.inputs || {};
+            const inputs = recoData?.debug?.inputs || {};
       const fv = recoData?.debug?.featureVector || {};
 
-              const body = {
+      const body = {
         lat: coords.latitude,
         lng: coords.longitude,
         l: brand.indutyLclasNm,       // 대분류 (예: "음식")
@@ -155,7 +158,9 @@ const MapScreen = () => {
         pois: storePois,
         topK: 20,
         year: "2024",
+        strategy,                     // 🔹 현재 선택된 추천 전략 공유
       };
+
 
       // admmCd / areaCd는 값 있을 때만 붙이기
       if (inputs.admmCd) {
@@ -223,6 +228,64 @@ const MapScreen = () => {
   };
 
 
+  // 🔹 추천 전략만 바꿔서 다시 카테고리 추천을 불러오는 헬퍼
+const refetchWithStrategy = async (nextStrategy) => {
+  // 좌표/상가/기존 추천 없으면 그냥 무시
+  if (!coords || !storePois.length || !recoData) return;
+
+  try {
+    setLoading(true);
+    setErrMsg(null);
+
+    const inputs = recoData?.debug?.inputs || {};
+    const fullDongName = inputs.fullDongName;
+
+    const kakaoAddrObj = {
+      x: String(coords.longitude),
+      y: String(coords.latitude),
+      b_code: undefined,
+      region_2depth_name: pickGuFromFull(fullDongName),
+    };
+
+    let payload = buildRecommendPayload({
+      kakaoAddr: kakaoAddrObj,
+      storesResp: storePois,
+      areaCd: undefined,
+      topK: 10,
+    });
+
+    // 사용자가 대/중분류 선택해둔 게 있으면 같이 전달
+    let targetCate = null;
+    if (selectedM) {
+      targetCate = { level: "M", name: selectedM };
+    } else if (selectedL) {
+      targetCate = { level: "L", name: selectedL };
+    }
+    if (targetCate) {
+      payload = { ...payload, targetCate };
+    }
+
+    // 🔹 전략 반영 (trend | gap)
+    payload = { ...payload, strategy: nextStrategy };
+
+    console.time("추천 API (strategy 변경)");
+    let rec;
+    try {
+      rec = await fetchRecommendations(payload);
+    } finally {
+      console.timeEnd("추천 API (strategy 변경)");
+    }
+
+    setRecoData(rec);
+  } catch (e) {
+    console.warn("전략 변경 후 추천 실패:", e);
+    setErrMsg(e?.message || "추천을 다시 불러오지 못했습니다.");
+  } finally {
+    setLoading(false);
+  }
+};
+
+
   const handleSearch = async () => {
   if (!address.trim() || loading) return;
   setErrMsg(null);
@@ -275,14 +338,18 @@ const MapScreen = () => {
       region_2depth_name: pickGuFromFull(fullDongName),
     };
 
-    let payload = buildRecommendPayload({
+        let payload = buildRecommendPayload({
       kakaoAddr: kakaoAddrObj,
       storesResp: stores,
       areaCd: undefined,
       topK: 10,
     });
 
+    // 🔹 추천 전략 추가 (trend | gap) - 백엔드 ReqSchema에 맞춰 전달
+    payload = { ...payload, strategy };
+
     let targetCate = null;
+
     if (selectedM) {
       targetCate = { level: "M", name: selectedM };
     } else if (selectedL) {
@@ -835,22 +902,22 @@ const storeSummary =
                       </Text>
                     </TouchableOpacity>
 
-                    {/* 🔹 C는 그대로 유지 */}
-                    <TouchableOpacity
-                      style={styles.scenarioCard}
-                      onPress={() => {
-                        setScenario("C");
-                        setAppStep("flow");
-                        setStep("summary"); // C 플로우 시작은 요약 화면
-                      }}
-                    >
-                      <Text style={styles.scenarioTitle}>
-                        B. 아직 아무것도 정하지 못했어요
-                      </Text>
-                      <Text style={styles.scenarioDesc}>
-                        이 상권에 어울리는 업종부터 추천받고 싶어요
-                      </Text>
-                    </TouchableOpacity>
+                    {/* 🔹 B: 아직 아무것도 정하지 못했어요 (추천 업종부터 보기) */}
+<TouchableOpacity
+  style={styles.scenarioCard}
+  onPress={() => {
+    setScenario("B");
+    setAppStep("flow");
+  }}
+>
+  <Text style={styles.scenarioTitle}>
+    B. 아직 아무것도 정하지 못했어요
+  </Text>
+  <Text style={styles.scenarioDesc}>
+    이 상권에 어울리는 업종(인기/틈새)을 먼저 추천받고 싶어요
+  </Text>
+</TouchableOpacity>
+
                   </View>
                 )}
 
@@ -1189,22 +1256,22 @@ const storeSummary =
 
                     {/* 🔹 B 시나리오: 업종만 있음 (브랜드는 아직) */}
                     {scenario === "B" && (
-                      <View>
-                        {whyLine && (
-                          <View style={styles.whyBadge}>
-                            <Text style={styles.whyText}>
-                              {whyLine}
-                            </Text>
-                          </View>
-                        )}
+  <View>
+    {whyLine && (
+      <View style={styles.whyBadge}>
+        <Text style={styles.whyText}>
+          {whyLine}
+        </Text>
+      </View>
+    )}
 
-                        <Text style={styles.sectionTitle}>
-                          어떤 업종(중분류)을 생각 중이신가요?
-                        </Text>
-                        <Text style={styles.dim}>
-                          먼저 업종(대분류/중분류)을 고른 뒤, 해당
-                          업종과 관련된 프랜차이즈 목록을 비교해 보세요.
-                        </Text>
+    <Text style={styles.sectionTitle}>
+      어떤 업종(중분류)을 생각 중이신가요?
+    </Text>
+    <Text style={styles.dim}>
+      먼저 업종(대분류/중분류)을 고른 뒤, 해당
+      업종과 관련된 프랜차이즈 목록을 비교해 보세요.
+    </Text>
 
                         {/* 대분류 선택 */}
                         <Text style={styles.subTitle}>대분류 선택</Text>
@@ -1259,15 +1326,16 @@ const storeSummary =
                         )}
 
                         {/* 선택된 중분류 설명 + 프랜차이즈 목록 */}
-                        {selectedM ? (
-                          <View style={{ marginTop: 10 }}>
-                            {/* 이 상권에서 이 업종은 어떤지 */}
-                            <Text style={styles.sectionTitle}>
-                              이 상권에서 「{selectedM}」 업종은 어떤가요?
-                            </Text>
-                                                        <Text style={styles.modalReason}>
-                              {buildCategoryWhy(selectedM, d, storeSummary)}
-                            </Text>
+                        {/* 선택된 중분류 설명 + 프랜차이즈 목록 */}
+    {selectedM ? (
+      <View style={{ marginTop: 10 }}>
+        {/* 이 상권에서 이 업종은 어떤지 */}
+        <Text style={styles.sectionTitle}>
+          이 상권에서 「{selectedM}」 업종은 어떤가요?
+        </Text>
+        <Text style={styles.modalReason}>
+          {buildCategoryWhy(selectedM, d, storeSummary)}
+        </Text>
 
 
                             {/* 관련 프랜차이즈 목록 */}
@@ -1370,702 +1438,151 @@ const storeSummary =
                             보여드릴게요.
                           </Text>
                         )}
-                      </View>
-                    )}
+                      {/* 🔹 이 상권 추천 업종 (인기 / 틈새) */}
+    <View style={{ marginTop: 16 }}>
+      <View style={styles.divider} />
+
+      <Text style={styles.sectionTitle}>
+        이 상권 추천 업종 보기
+      </Text>
+      <Text style={styles.dim}>
+        추천 기준을 고르면, 이 상권에 어울리는 업종을
+        인기/틈새 위주로 5개씩 보여드려요.
+      </Text>
+
+      {/* 추천 기준 (전략) */}
+      <Text style={styles.subTitle}>추천 기준</Text>
+      <View style={styles.chipRow}>
+        <Chip
+          label="인기 업종 위주"
+          active={strategy === "trend"}
+          onPress={() => {
+            if (strategy === "trend") return;
+            const next = "trend";
+            setStrategy(next);
+            refetchWithStrategy(next);
+          }}
+        />
+        <Chip
+          label="틈새 업종 위주"
+          active={strategy === "gap"}
+          onPress={() => {
+            if (strategy === "gap") return;
+            const next = "gap";
+            setStrategy(next);
+            refetchWithStrategy(next);
+          }}
+        />
+      </View>
+
+      {/* 업종 분포 필터 (많이/적게 존재) */}
+      <Text style={styles.subTitle}>업종 분포 필터</Text>
+      <View style={styles.chipRow}>
+        <Chip
+          label="많이 존재하는 업종만"
+          active={densityFilter === "many"}
+          onPress={() =>
+            setDensityFilter(
+              densityFilter === "many" ? "all" : "many"
+            )
+          }
+        />
+        <Chip
+          label="거의 없는 업종만"
+          active={densityFilter === "few"}
+          onPress={() =>
+            setDensityFilter(
+              densityFilter === "few" ? "all" : "few"
+            )
+          }
+        />
+      </View>
+
+      {/* 실제 추천 리스트 */}
+      {effectiveTop.length > 0 && (
+        <>
+          {/* 탭 스위치 */}
+          <View style={styles.tabs}>
+            <TabButton
+              label="일반 창업 가능"
+              active={activeTab === "openable"}
+              onPress={() => setActiveTab("openable")}
+            />
+            <TabButton
+              label="전문/허가 필요"
+              active={activeTab === "licensed"}
+              onPress={() => setActiveTab("licensed")}
+            />
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* 선택한 대분류 안에서 중분류 TOP 5 */}
+          {selectedL && midTop5.length > 0 && (
+            <>
+              <Text style={styles.recoTitle}>
+                선택한 대분류 안에서 중분류 추천 (TOP 5)
+              </Text>
+              {renderMidList(midTop5)}
+              <View style={styles.divider} />
+            </>
+          )}
+
+          {/* 소분류 TOP 5 */}
+          <Text style={styles.recoTitle}>
+            {activeTab === "openable"
+              ? "소분류 추천 - 일반 창업 가능 (5개)"
+              : "소분류 추천 - 전문/허가 필요 (5개)"}
+          </Text>
+
+          {(activeTab === "openable" ? openable5 : licensed5).map(
+            (r) => {
+              const meta = getMeta(r.category);
+              return (
+                <Text key={r.category} style={styles.recoItem}>
+                  • {r.category}
+                  <Text style={styles.recoScore}>
+                    {" "}
+                    {typeof r.score === "number"
+                      ? r.score.toFixed(3)
+                      : String(r.score)}
+                  </Text>
+                  {!meta.openable && (
+                    <Text style={styles.licenseBadge}>
+                      {" "}
+                      허가/자격 필요
+                    </Text>
+                  )}
+                  {r._fromOtherGroup && (
+                    <Text style={styles.altBadge}>
+                      {" "}
+                      대체추천
+                    </Text>
+                  )}
+                </Text>
+              );
+            }
+          )}
+
+          {filteredTop.length === 0 &&
+            (selectedL ||
+              selectedM ||
+              searchQuery.trim() ||
+              densityFilter !== "all") && (
+              <Text style={[styles.dim, { marginTop: 4 }]}>
+                선택한 대/중분류나 필터, 검색 조건에 딱 맞는 업종은
+                없어서, 전체 추천 기준으로 보여드리고 있어요.
+              </Text>
+            )}
+        </>
+      )}
+    </View>
+  </View>
+)}
 
                     {/* 🔹 C 시나리오: 완전 추천 모드 (기존 플로우) */}
                     
-                    {scenario === "C" && (
-                    <>
-                    {/* 1) 요약 단계 */}
-                    {step === "summary" && (
-                      <View>
-                        {whyLine && (
-                          <View style={styles.whyBadge}>
-                            <Text style={styles.whyText}>
-                              {whyLine}
-                            </Text>
-                          </View>
-                        )}
-
-                        {(areaSummary || d) && (
-                          <>
-                            {/* 한 줄 요약 */}
-                            {areaSummary?.summaryLine && (
-                              <>
-                                <Text style={styles.sectionTitle}>
-                                  이 지역 한 줄 요약
-                                </Text>
-                                <Text style={styles.item}>
-                                  {areaSummary.summaryLine}
-                                </Text>
-                              </>
-                            )}
-
-                            {/* 인구·연령 */}
-                            <Text style={styles.sectionTitle}>
-                              인구·연령
-                            </Text>
-                            <Text style={styles.item}>
-                              {areaSummary?.population?.mainAgeLabel ||
-                                d?.demographics?.age20s?.label}
-                              {" · "}
-                              {areaSummary?.population?.genderLabel ||
-                                d?.demographics?.female?.label}
-                            </Text>
-
-                            {/* 상권/결제 */}
-                            <Text style={styles.sectionTitle}>
-                              상권/결제
-                            </Text>
-                            <Text style={styles.item}>
-                              {areaSummary?.commerce?.paymentLevelLabel ||
-                                d?.commerce?.notes ||
-                                `결제강도(log) ${fmtNum(
-                                  d?.commerce?.pay_cnt_log
-                                )} · 상권레벨 ${fmtNum(
-                                  d?.commerce?.cmrcl_level
-                                )}`}
-                            </Text>
-
-                            {/* 업종 분포 */}
-                            <Text style={styles.sectionTitle}>
-                              업종 분포
-                            </Text>
-                            <Text style={styles.item}>
-                              {storeSummary?.summaryLine
-                                ? storeSummary.summaryLine
-                                : `총 ${d?.poi?.total ?? 0}개 · 다양도(entropy) ${fmtNum(
-                                    d?.poi?.entropy
-                                  )}`}
-                            </Text>
-
-                            {/* 참고용 상권 정보 카드 */}
-                            <Text style={styles.sectionTitle}>
-                              참고용 상권 정보 (필터에 영향 X)
-                            </Text>
-                            <View style={styles.infoCardRow}>
-                              {/* 많이 보이는 업종 TOP 5 카드 */}
-                              <TouchableOpacity
-                                style={styles.infoCard}
-                                onPress={() => {
-                                  setPoiModalType("many");
-                                  setPoiModalVisible(true);
-                                }}
-                              >
-                                <Text style={styles.infoCardTitle}>
-                                  많이 보이는 업종 TOP 5
-                                </Text>
-                                {(d?.poi?.topMost || [])
-                                  .slice(0, 3)
-                                  .map((it) => (
-                                    <Text
-                                      key={it.category}
-                                      style={styles.infoCardItem}
-                                    >
-                                      • {it.category} (
-                                      {(it.share * 100).toFixed(1)}%)
-                                    </Text>
-                                  ))}
-                                {(d?.poi?.topMost || []).length === 0 && (
-                                  <Text style={styles.infoCardEmpty}>
-                                    데이터 없음
-                                  </Text>
-                                )}
-                              </TouchableOpacity>
-
-                              {/* 거의 없는 업종 TOP 5 카드 */}
-                              <TouchableOpacity
-                                style={styles.infoCard}
-                                onPress={() => {
-                                  setPoiModalType("few");
-                                  setPoiModalVisible(true);
-                                }}
-                              >
-                                <Text style={styles.infoCardTitle}>
-                                  거의 없는 업종 TOP 5
-                                </Text>
-                                {(d?.poi?.leastCommon || [])
-                                  .slice(0, 3)
-                                  .map((it) => (
-                                    <Text
-                                      key={it.category}
-                                      style={styles.infoCardItem}
-                                    >
-                                      • {it.category} (
-                                      {(it.share * 100).toFixed(1)}%)
-                                    </Text>
-                                  ))}
-                                {(d?.poi?.leastCommon || []).length === 0 && (
-                                  <Text style={styles.infoCardEmpty}>
-                                    데이터 없음
-                                  </Text>
-                                )}
-                              </TouchableOpacity>
-                            </View>
-                          </>
-                        )}
-
-                        <View style={{ marginTop: 10 }}>
-                          <TouchableOpacity
-                            style={[
-                              styles.tabBtn,
-                              styles.tabBtnActive,
-                            ]}
-                            onPress={() => setStep("category")}
-                          >
-                            <Text style={styles.tabTxtActive}>
-                              추천 업종 보기
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    )}
-
-
-
-                        {/* 2) 업종 선택 단계 */}
-                        {step === "category" && (
-                          <View>
-                            {whyLine && (
-                              <View style={styles.whyBadge}>
-                                <Text style={styles.whyText}>
-                                  {whyLine}
-                                </Text>
-                              </View>
-                            )}
-
-                            {/* 검색 + breadcrumb + 고급필터 */}
-                            <View style={{ marginTop: 10 }}>
-                              <Text style={styles.sectionTitle}>
-                                어떤 업종을 생각 중이신가요?
-                              </Text>
-                              <TextInput
-                                value={searchQuery}
-                                onChangeText={setSearchQuery}
-                                placeholder="업종이나 프랜차이즈 이름을 직접 검색해보세요"
-                                style={styles.searchInput}
-                              />
-
-                              {/* 단계 표시 (Breadcrumb) */}
-                              <Text style={styles.breadcrumb}>
-                                {selectedL || selectedM
-                                  ? `${selectedL ?? "대분류 미선택"}${
-                                      selectedM
-                                        ? " > " + selectedM
-                                        : ""
-                                    }`
-                                  : "대분류 > 중분류 > 프랜차이즈(선택)"}
-                              </Text>
-
-                              {/* 고급 필터 토글 */}
-                              <TouchableOpacity
-                                style={styles.advancedToggle}
-                                onPress={() =>
-                                  setShowAdvancedFilter(
-                                    (prev) => !prev
-                                  )
-                                }
-                              >
-                                <Text
-                                  style={styles.advancedToggleText}
-                                >
-                                  {showAdvancedFilter
-                                    ? "고급 필터 접기"
-                                    : "고급 필터 열기"}
-                                </Text>
-                              </TouchableOpacity>
-
-                              {showAdvancedFilter && (
-                                <View style={styles.advancedBox}>
-                                  <Text style={styles.subTitle}>
-                                    수요/매출 관련
-                                  </Text>
-                                  <View style={styles.chipRow}>
-                                    {/* TODO: 성장률 데이터 연결 시 로직 적용 */}
-                                    <Chip
-                                      label="성장률 높은 업종만"
-                                      active={false}
-                                      onPress={() => {}}
-                                    />
-                                  </View>
-
-                                  <Text style={styles.subTitle}>
-                                    경쟁도 관련
-                                  </Text>
-                                  <View style={styles.chipRow}>
-                                    <Chip
-                                      label="많이 존재하는 업종만"
-                                      active={densityFilter === "many"}
-                                      onPress={() =>
-                                        setDensityFilter(
-                                          densityFilter === "many"
-                                            ? "all"
-                                            : "many"
-                                        )
-                                      }
-                                    />
-                                    <Chip
-                                      label="거의 없는 업종만"
-                                      active={densityFilter === "few"}
-                                      onPress={() =>
-                                        setDensityFilter(
-                                          densityFilter === "few"
-                                            ? "all"
-                                            : "few"
-                                        )
-                                      }
-                                    />
-                                  </View>
-
-                                  <Text style={styles.subTitle}>
-                                    형태 관련
-                                  </Text>
-                                  <View style={styles.chipRow}>
-                                    {/* TODO: 프랜차이즈/비프랜차이즈 구분 데이터 연결 필요 */}
-                                    <Chip
-                                      label="프랜차이즈만"
-                                      active={false}
-                                      onPress={() => {}}
-                                    />
-                                    <Chip
-                                      label="비프랜차이즈만"
-                                      active={false}
-                                      onPress={() => {}}
-                                    />
-                                  </View>
-                                </View>
-                              )}
-                            </View>
-
-                            <View style={{ marginTop: 10 }}>
-                              <Text style={styles.sectionTitle}>
-                                업종 필터
-                              </Text>
-
-                              {/* 대분류 */}
-                              <Text style={styles.subTitle}>
-                                대분류 선택
-                              </Text>
-                              <View style={styles.chipRow}>
-                                {lOptions.map((l) => (
-                                  <Chip
-                                    key={l}
-                                    label={l}
-                                    active={selectedL === l}
-                                    status={
-                                      blockedL.includes(l)
-                                        ? "blocked"
-                                        : interestedL.includes(l)
-                                        ? "liked"
-                                        : "normal"
-                                    }
-                                    onPress={() =>
-                                      handleSelectL(l)
-                                    }
-                                    onLongPress={() =>
-                                      handleToggleInterestL(l)
-                                    }
-                                  />
-                                ))}
-                                {lOptions.length === 0 && (
-                                  <Text style={styles.dim}>
-                                    대분류 정보가 부족합니다.
-                                  </Text>
-                                )}
-                              </View>
-                              <Text style={styles.dim}>
-                                ※ 대분류 칩을 길게 누르면 "관심있음 → 관심없음 → 해제"
-                                로 바뀌고, 관심없는 대분류는 추천에서
-                                제외돼요.
-                              </Text>
-
-                              {/* 중분류 */}
-                              <Text style={styles.subTitle}>
-                                중분류 선택
-                              </Text>
-                              {mOptions.length > 0 ? (
-                                <View style={styles.chipRow}>
-                                  {mOptions.map((m) => (
-                                    <Chip
-                                      key={m}
-                                      label={m}
-                                      active={selectedM === m}
-                                      onPress={() =>
-                                        handleSelectM(m)
-                                      }
-                                    />
-                                  ))}
-                                </View>
-                              ) : (
-                                <Text style={styles.dim}>
-                                  이 상권에서는 중분류 데이터가 거의
-                                  없어 대분류만 사용할 수 있어요.
-                                </Text>
-                              )}
-
-                              <Text style={styles.dim}>
-                                ※ 대/중분류를 바꾸면, 해당 계층에 속한
-                                소분류만 추천 리스트에 보여줘요.
-                              </Text>
-
-                              {/* 프랜차이즈 추천 */}
-                              <Text style={styles.subTitle}>
-                                프랜차이즈 추천
-                                {searchedBrandList.length > 0 &&
-                                  ` (TOP ${Math.min(
-                                    10,
-                                    searchedBrandList.length
-                                  )})`}
-                              </Text>
-                              {brandLoading && (
-                                <Text style={styles.dim}>
-                                  프랜차이즈 불러오는 중…
-                                </Text>
-                              )}
-                              {!brandLoading && brandErr && (
-                                <Text
-                                  style={{
-                                    color: "#B91C1C",
-                                    fontSize: 12,
-                                  }}
-                                >
-                                  {brandErr}
-                                </Text>
-                              )}
-                              {!brandLoading && !brandErr && (
-                                searchedBrandList.length > 0 ? (
-                                  <View style={{ marginTop: 4 }}>
-                                    {searchedBrandList
-                                      .slice(0, 10)
-                                      .map((b, idx) => (
-                                        <TouchableOpacity
-                                          key={`${b.brandNm}-${idx}`}
-                                          onPress={() =>
-                                            openBrandModal(b)
-                                          }
-                                        >
-                                          <Text style={styles.item}>
-                                            <Text
-                                              style={
-                                                styles.brandRank
-                                              }
-                                            >
-                                              {idx + 1}.
-                                            </Text>{" "}
-                                            <Text
-                                              style={
-                                                styles.brandName
-                                              }
-                                            >
-                                              {b.brandNm}
-                                            </Text>
-                                            {b.frcsCnt != null && (
-                                              <Text
-                                                style={
-                                                  styles.brandMeta
-                                                }
-                                              >
-                                                {"  · 가맹점 "}
-                                                {b.frcsCnt}
-                                                개
-                                              </Text>
-                                            )}
-                                            {b.avrgSlsAmt != null && (
-                                              <Text
-                                                style={
-                                                  styles.brandMeta
-                                                }
-                                              >
-                                                {"  · 평균 매출 "}
-                                                {Number(
-                                                  b.avrgSlsAmt
-                                                ).toLocaleString()}
-                                                원
-                                              </Text>
-                                            )}
-                                          </Text>
-                                        </TouchableOpacity>
-                                      ))}
-                                  </View>
-                                ) : (
-                                  <Text style={styles.dim}>
-                                    {selectedL || selectedM
-                                      ? "선택한 대/중분류 및 검색 조건에 맞는 프랜차이즈가 없어요."
-                                      : "프랜차이즈 정보가 없어요."}
-                                  </Text>
-                                )
-                              )}
-                            </View>
-
-                            {/* 탭 스위치 */}
-                            {effectiveTop.length > 0 && (
-                              <View style={styles.tabs}>
-                                <TabButton
-                                  label="일반 창업 가능"
-                                  active={
-                                    activeTab === "openable"
-                                  }
-                                  onPress={() =>
-                                    setActiveTab("openable")
-                                  }
-                                />
-                                <TabButton
-                                  label="전문/허가 필요"
-                                  active={
-                                    activeTab === "licensed"
-                                  }
-                                  onPress={() =>
-                                    setActiveTab("licensed")
-                                  }
-                                />
-                              </View>
-                            )}
-
-                            {/* 추천 리스트 (중분류 + 소분류) */}
-                            {effectiveTop.length > 0 && (
-                              <>
-                                <View style={styles.divider} />
-
-                                {/* 중분류 TOP 5 */}
-                                {selectedL &&
-                                  midTop5.length > 0 && (
-                                    <>
-                                      <Text
-                                        style={styles.recoTitle}
-                                      >
-                                        선택한 대분류 안에서
-                                        중분류 추천 (TOP 5)
-                                      </Text>
-                                      {renderMidList(midTop5)}
-                                      <View
-                                        style={styles.divider}
-                                      />
-                                    </>
-                                  )}
-
-                                {/* 소분류 TOP 5 */}
-                                <Text style={styles.recoTitle}>
-                                  {activeTab === "openable"
-                                    ? "소분류 추천 - 일반 창업 가능 (5개)"
-                                    : "소분류 추천 - 전문/허가 필요 (5개)"}
-                                </Text>
-
-                                {(activeTab === "openable"
-                                  ? openable5
-                                  : licensed5
-                                ).map((r) => {
-                                  const meta = getMeta(
-                                    r.category
-                                  );
-                                  return (
-                                    <TouchableOpacity
-                                      key={r.category}
-                                      onPress={() => {
-                                        setSelectedCategory(
-                                          r
-                                        );
-                                        setStep("result");
-                                      }}
-                                    >
-                                      <Text
-                                        style={styles.recoItem}
-                                      >
-                                        • {r.category}
-                                        <Text
-                                          style={
-                                            styles.recoScore
-                                          }
-                                        >
-                                          {" "}
-                                          {typeof r.score ===
-                                          "number"
-                                            ? r.score.toFixed(
-                                                3
-                                              )
-                                            : String(
-                                                r.score
-                                              )}
-                                        </Text>
-                                        {!meta.openable && (
-                                          <Text
-                                            style={
-                                              styles.licenseBadge
-                                            }
-                                          >
-                                            {" "}
-                                            허가/자격 필요
-                                          </Text>
-                                        )}
-                                        {r._fromOtherGroup && (
-                                          <Text
-                                            style={
-                                              styles.altBadge
-                                            }
-                                          >
-                                            {" "}
-                                            대체추천
-                                          </Text>
-                                        )}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  );
-                                })}
-
-                                {filteredTop.length === 0 &&
-                                  (selectedL ||
-                                    selectedM ||
-                                    searchQuery.trim() ||
-                                    densityFilter !==
-                                      "all") && (
-                                    <Text
-                                      style={[
-                                        styles.dim,
-                                        { marginTop: 4 },
-                                      ]}
-                                    >
-                                      선택한 대/중분류나 필터,
-                                      검색 조건에 딱 맞는 업종은
-                                      없어서, 전체 추천 기준으로
-                                      보여드리고 있어요.
-                                    </Text>
-                                  )}
-                              </>
-                            )}
-                          </View>
-                        )}
-
-                        {/* 3) 결과 단계 */}
-                        {step === "result" &&
-                          selectedCategory && (
-                            <View>
-                              <Text
-                                style={styles.sectionTitle}
-                              >
-                                선택한 업종
-                              </Text>
-                              <Text style={styles.recoItem}>
-                                {selectedCategory.category} · 점수{" "}
-                                {typeof selectedCategory.score ===
-                                "number"
-                                  ? selectedCategory.score.toFixed(
-                                      3
-                                    )
-                                  : String(
-                                      selectedCategory.score
-                                    )}
-                              </Text>
-
-                              {whyLine && (
-                                <View
-                                  style={[
-                                    styles.whyBadge,
-                                    { marginTop: 8 },
-                                  ]}
-                                >
-                                  <Text
-                                    style={styles.whyText}
-                                  >
-                                    {whyLine}
-                                  </Text>
-                                </View>
-                              )}
-
-                              {d && (
-                                <>
-                                  <Text
-                                    style={
-                                      styles.sectionTitle
-                                    }
-                                  >
-                                    이 상권과 이 업종
-                                  </Text>
-                                  <Text style={styles.item}>
-                                    •{" "}
-                                    {
-                                      d.demographics
-                                        ?.female?.label
-                                    }
-                                    ,{" "}
-                                    {
-                                      d.demographics
-                                        ?.age20s?.label
-                                    }
-                                    ,{" "}
-                                    {
-                                      d.demographics
-                                        ?.age30s?.label
-                                    }
-                                  </Text>
-                                  <Text style={styles.item}>
-                                    • 상권/결제:{" "}
-                                    {d.commerce?.notes ||
-                                      `결제강도(log) ${fmtNum(
-                                        d.commerce?.pay_cnt_log
-                                      )} · 상권레벨 ${fmtNum(
-                                        d.commerce?.cmrcl_level
-                                      )}`}
-                                  </Text>
-                                  {d.poi && (
-                                    <Text
-                                      style={styles.item}
-                                    >
-                                      • 업종 수{" "}
-                                      {d.poi.total ?? 0}
-                                      개 · 다양도{" "}
-                                      {fmtNum(
-                                        d.poi.entropy
-                                      )}
-                                    </Text>
-                                  )}
-                                </>
-                              )}
-
-                              <View
-                                style={{
-                                  marginTop: 10,
-                                  flexDirection: "row",
-                                  gap: 8,
-                                }}
-                              >
-                                <TouchableOpacity
-                                  style={[
-                                    styles.tabBtn,
-                                    { flex: 1 },
-                                  ]}
-                                  onPress={() =>
-                                    setStep("category")
-                                  }
-                                >
-                                  <Text
-                                    style={styles.tabTxt}
-                                  >
-                                    다른 업종 보기
-                                  </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.tabBtn,
-                                    styles.tabBtnActive,
-                                    { flex: 1 },
-                                  ]}
-                                  onPress={() =>
-                                    setStep("summary")
-                                  }
-                                >
-                                  <Text
-                                    style={
-                                      styles.tabTxtActive
-                                    }
-                                  >
-                                    상권 요약 보기
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-                          )}
-                      </>
-                    )}
+                    
                   </>
                 )}
               </>
