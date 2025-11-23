@@ -1216,38 +1216,30 @@ const storeSummary =
                                 </Text>
                               </TouchableOpacity>
 
-                              <TouchableOpacity
-                                style={[
-                                  styles.tabBtn,
-                                  styles.tabBtnActive,
-                                  { flex: 1 },
-                                ]}
-                                onPress={() => {
-                                  // 이 업종에서 비프랜차이즈 비교 → C 시나리오로 점프
-                                  if (
-                                    selectedBrandA.indutyLclasNm
-                                  ) {
-                                    setSelectedL(
-                                      selectedBrandA.indutyLclasNm
-                                    );
-                                  }
-                                  if (
-                                    selectedBrandA.indutyMlsfcNm
-                                  ) {
-                                    setSelectedM(
-                                      selectedBrandA.indutyMlsfcNm
-                                    );
-                                  }
-                                  setScenario("C");
-                                  setAppStep("flow");
-                                  setStep("category");
-                                }}
-                              >
-                                <Text style={styles.tabTxtActive}>
-                                  이 업종에서 개인 창업으로
-                                  비교해 보기
-                                </Text>
-                              </TouchableOpacity>
+                                <TouchableOpacity
+    style={[
+      styles.tabBtn,
+      styles.tabBtnActive,
+      { flex: 1 },
+    ]}
+    onPress={() => {
+      // 👉 이 업종 기준으로 다른 업종 추천 보러 가기 → B 시나리오로 이동
+      if (selectedBrandA.indutyLclasNm) {
+        setSelectedL(selectedBrandA.indutyLclasNm);
+      }
+      if (selectedBrandA.indutyMlsfcNm) {
+        setSelectedM(selectedBrandA.indutyMlsfcNm);
+      }
+      setScenario("B");     // 🔴 C → 🟢 B 로 변경
+      setAppStep("flow");
+      // setStep("category"); // B에서는 step 안 쓰면 이 줄은 지워도 됨
+    }}
+  >
+    <Text style={styles.tabTxtActive}>
+      다른 업종 추천 받으러 가기
+    </Text>
+  </TouchableOpacity>
+
                             </View>
                           </View>
                         )}
@@ -1428,17 +1420,55 @@ const storeSummary =
                           </View>
                         ) : (
                           <Text
-                            style={[
-                              styles.dim,
-                              { marginTop: 8 },
-                            ]}
-                          >
-                            ※ 중분류 업종을 먼저 선택하면, 이 상권에서
-                            해당 업종이 어떤지와 관련 프랜차이즈를
-                            보여드릴게요.
-                          </Text>
-                        )}
-                      {/* 🔹 이 상권 추천 업종 (인기 / 틈새) */}
+        style={[
+          styles.dim,
+          { marginTop: 8 },
+        ]}
+      >
+        ※ 중분류 업종을 먼저 선택하면, 이 상권에서
+        해당 업종이 어떤지와 관련 프랜차이즈를
+        보여드릴게요.
+      </Text>
+    )}
+
+    {/* 🔹 (NEW) 현황: Baseline – 현재 많이 들어선 업종 TOP 5 */}
+    {d?.poi?.topMost && d.poi.topMost.length > 0 && (
+      <View style={{ marginTop: 16 }}>
+        <View style={styles.divider} />
+
+        <Text style={styles.sectionTitle}>
+          이 지역에서 많이 보이는 업종 (현황)
+        </Text>
+        <Text style={styles.dim}>
+          현재 이 위치 주변 반경 내에서 점포 수가 많은 업종 TOP 5입니다.
+        </Text>
+
+        {d.poi.topMost.map((it) => (
+          <Text key={it.category} style={styles.item}>
+            • {it.category}
+            <Text style={styles.recoScore}>
+              {"  "}
+              점포 {it.count}개 · 점유율{" "}
+              {(it.share * 100).toFixed(1)}%
+            </Text>
+          </Text>
+        ))}
+
+        <TouchableOpacity
+          style={styles.advancedToggle}
+          onPress={() => {
+            setPoiModalType("many");
+            setPoiModalVisible(true);
+          }}
+        >
+          <Text style={styles.advancedToggleText}>
+            상권 업종 분포 자세히 보기 &gt;
+          </Text>
+        </TouchableOpacity>
+      </View>
+    )}
+
+    {/* 🔹 이 상권 추천 업종 (인기 / 틈새) – 기존 로직 그대로 */}
     <View style={{ marginTop: 16 }}>
       <View style={styles.divider} />
 
@@ -1474,6 +1504,7 @@ const storeSummary =
           }}
         />
       </View>
+
 
       {/* 업종 분포 필터 (많이/적게 존재) */}
       <Text style={styles.subTitle}>업종 분포 필터</Text>
@@ -1580,7 +1611,6 @@ const storeSummary =
   </View>
 )}
 
-                    {/* 🔹 C 시나리오: 완전 추천 모드 (기존 플로우) */}
                     
                     
                   </>
