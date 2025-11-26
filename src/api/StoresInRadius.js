@@ -5,13 +5,13 @@ const STORE_API_URL =
   "https://apis.data.go.kr/B553077/api/open/sdsc2/storeListInRadius";
 
 // 반경 내 상가 조회
-export const getStoresInRadius = async ({ latitude, longitude, radius = 500 }) => {
+export const getStoresInRadius = async ({ latitude, longitude, radius = 1000 }) => {
   try {
     const res = await axios.get(STORE_API_URL, {
       params: {
         ServiceKey: Config.SERVICE_KEY, // .env에 넣어둔 값
         pageNo: 1,
-        numOfRows: 500,
+        numOfRows: 1000,
         radius: radius, // 500m
         cx: longitude,  // 경도
         cy: latitude,   // 위도

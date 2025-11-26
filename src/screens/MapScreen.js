@@ -128,91 +128,93 @@ const MapScreen = () => {
   
     // 🔹 특정 브랜드에 대한 추천 점수/이유를 백엔드에서 가져오는 헬퍼
   const loadBrandReco = async (brand) => {
-    try {
-      // 기본 정보 없으면 스킵
-      if (!brand?.indutyLclasNm || !brand?.indutyMlsfcNm) return;
-      if (!coords || !storePois.length || !recoData) return;
+     console.log("[loadBrandReco] called for", brand?.brandNm);
+  try {
+    // 기본 정보 없으면 스킵
+    if (!brand?.indutyLclasNm || !brand?.indutyMlsfcNm) return;
+    if (!coords || !storePois.length || !recoData) return;
 
-      const cacheKey = brand.brandNm;
-      // 이미 캐시에 있으면 바로 merge만
-      if (brandRecoCache[cacheKey]) {
-        setSelectedBrandDetail((prev) =>
-          prev && prev.brandNm === brand.brandNm
-            ? { ...prev, ...brandRecoCache[cacheKey] }
-            : prev
-        );
-        return;
-      }
-
-      setBrandLoading(true);
-
-            const inputs = recoData?.debug?.inputs || {};
-      const fv = recoData?.debug?.featureVector || {};
-
-      const body = {
-        lat: coords.latitude,
-        lng: coords.longitude,
-        l: brand.indutyLclasNm,       // 대분류 (예: "음식")
-        m: brand.indutyMlsfcNm,       // 중분류 (예: "일식")
-        radius: fv.radius || 300,
-        pois: storePois,
-        topK: 20,
-        year: "2024",
-        strategy,                     // 🔹 현재 선택된 추천 전략 공유
-      };
-
-
-      // admmCd / areaCd는 값 있을 때만 붙이기
-      if (inputs.admmCd) {
-        body.admmCd = inputs.admmCd;
-      }
-      if (inputs.resolvedAreaCd || inputs.areaCdFromClient) {
-        body.areaCd = inputs.resolvedAreaCd || inputs.areaCdFromClient;
-      }
-
-
-
-      const res = await fetch(`${RECO_API_BASE}/brands/recommendations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      const json = await res.json();
-      const matched =
-        (json.brands || []).find((b) => b.brandNm === brand.brandNm) || null;
-
-      if (matched) {
-        // 캐시에 저장
-        setBrandRecoCache((prev) => ({
-          ...prev,
-          [cacheKey]: matched,
-        }));
-
-        // 현재 선택된 상세에 merge
-        setSelectedBrandDetail((prev) =>
-          prev && prev.brandNm === brand.brandNm
-            ? { ...prev, ...matched }
-            : prev
-        );
-
-        // A 시나리오에서 선택된 브랜드도 업데이트
-        setSelectedBrandA((prev) =>
-          prev && prev.brandNm === brand.brandNm
-            ? { ...prev, ...matched }
-            : prev
-        );
-      }
-    } catch (e) {
-      console.log("브랜드 추천 점수/이유 조회 실패:", e);
-    } finally {
-      setBrandLoading(false);
+    const cacheKey = brand.brandNm;
+    // 이미 캐시에 있으면 바로 merge만
+    if (brandRecoCache[cacheKey]) {
+      setSelectedBrandDetail((prev) =>
+        prev && prev.brandNm === brand.brandNm
+          ? { ...prev, ...brandRecoCache[cacheKey] }
+          : prev
+      );
+      return;
     }
-  };
+
+    setBrandLoading(true);
+
+    const inputs = recoData?.debug?.inputs || {};
+    const fv = recoData?.debug?.featureVector || {};
+
+    // 🔹 여기서 브랜드 추천용 body를 한 번만 깔끔하게 만든다
+    const body = {
+      lat: coords.latitude,
+      lng: coords.longitude,
+      l: brand.indutyLclasNm,   // 대분류 (예: "음식")
+      m: brand.indutyMlsfcNm,   // 중분류 (예: "한식")
+      radius: fv.radius || 300,
+      pois: storePois,          // 주변 상가 500개
+      topK: 20,
+      year: "2024",
+      strategy,                 // 백엔드는 안 써도 상관 없음 (무시됨)
+    };
+
+    // admmCd / areaCd는 값 있을 때만 붙이기
+    if (inputs.admmCd) {
+      body.admmCd = inputs.admmCd;
+    }
+    if (inputs.resolvedAreaCd || inputs.areaCdFromClient) {
+      body.areaCd = inputs.resolvedAreaCd || inputs.areaCdFromClient;
+    }
+
+    // 🔹 body 그대로 사용
+    const res = await fetch(`${RECO_API_BASE}/brands/recommendations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const json = await res.json();
+
+    const matched =
+      (json.brands || []).find((b) => b.brandNm === brand.brandNm) || null;
+
+    if (matched) {
+      // 캐시에 저장
+      setBrandRecoCache((prev) => ({
+        ...prev,
+        [cacheKey]: matched,
+      }));
+
+      // 현재 선택된 상세에 merge
+      setSelectedBrandDetail((prev) =>
+        prev && prev.brandNm === brand.brandNm
+          ? { ...prev, ...matched }
+          : prev
+      );
+
+      // A 시나리오에서 선택된 브랜드도 업데이트
+      setSelectedBrandA((prev) =>
+        prev && prev.brandNm === brand.brandNm
+          ? { ...prev, ...matched }
+          : prev
+      );
+    }
+  } catch (e) {
+    console.log("브랜드 추천 점수/이유 조회 실패:", e);
+  } finally {
+    setBrandLoading(false);
+  }
+};
+
 
   // 🔹 프랜차이즈 모달 열기/닫기 헬퍼
   const openBrandModal = (brand) => {
@@ -626,42 +628,71 @@ const storeSummary =
     ));
 
   /** 🔹 프랜차이즈 목록: L/M에 맞는 것만 추천에 사용 */
-  useEffect(() => {
-    if (!selectedL && !selectedM) {
-      setBrandList([]);
+  /** 🔹 프랜차이즈 목록: 이 상권 + 선택한 L/M 기준 추천 */
+useEffect(() => {
+  // 중분류/좌표/상가/추천결과가 준비 안 됐으면 비우고 종료
+  if (!selectedM || !coords || !storePois.length || !recoData) {
+    setBrandList([]);
+    setBrandErr(null);
+    return;
+  }
+
+  const fetchBrands = async () => {
+    try {
+      setBrandLoading(true);
       setBrandErr(null);
-      return;
-    }
 
-    const fetchBrands = async () => {
-      try {
-        setBrandLoading(true);
-        setBrandErr(null);
+      const inputs = recoData?.debug?.inputs || {};
+      const fv = recoData?.debug?.featureVector || {};
 
-        const qs = new URLSearchParams();
-        if (selectedL) qs.append("l", selectedL);
-        if (selectedM) qs.append("m", selectedM);
-        qs.append("year", "2024");
+      const body = {
+        lat: coords.latitude,
+        lng: coords.longitude,
+        l: selectedL || "음식",   // 대분류 없으면 임시 기본값
+        m: selectedM,             // 선택한 중분류 (예: "한식")
+        radius: fv.radius || 300,
+        pois: storePois,          // 주변 상가 500개 (bizesNm 포함)
+        topK: 20,
+        year: "2024",
+      };
 
-        const res = await fetch(
-          `${RECO_API_BASE}/brands/by-category?${qs.toString()}`
-        );
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-        const json = await res.json();
-        setBrandList(json.brands || []);
-      } catch (e) {
-        console.log("브랜드 조회 실패:", e);
-        setBrandErr("프랜차이즈 정보를 불러오지 못했어요.");
-        setBrandList([]);
-      } finally {
-        setBrandLoading(false);
+      // admmCd / areaCd는 값 있을 때만 붙이기
+      if (inputs.admmCd) {
+        body.admmCd = inputs.admmCd;
       }
-    };
+      if (inputs.resolvedAreaCd || inputs.areaCdFromClient) {
+        body.areaCd = inputs.resolvedAreaCd || inputs.areaCdFromClient;
+      }
 
-    fetchBrands();
-  }, [selectedL, selectedM]);
+      console.log("[BrandReco] request body:", body);
+
+      const res = await fetch(`${RECO_API_BASE}/brands/recommendations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const json = await res.json();
+      console.log("[BrandReco] response:", json);
+
+      // 이 상권 기준으로 추천된 프랜차이즈 리스트
+      setBrandList(json.brands || []);
+    } catch (e) {
+      console.log("브랜드 추천 목록 조회 실패:", e);
+      setBrandErr("프랜차이즈 정보를 불러오지 못했어요.");
+      setBrandList([]);
+    } finally {
+      setBrandLoading(false);
+    }
+  };
+
+  fetchBrands();
+}, [selectedL, selectedM, coords, storePois, recoData]);
+
 
   // 🔹 선택한 L/M + taxonomy 기준으로 프랜차이즈 필터
   const filteredBrandList = brandList.filter((b) => {
