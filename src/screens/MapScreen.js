@@ -151,17 +151,27 @@ const MapScreen = () => {
     const fv = recoData?.debug?.featureVector || {};
 
     // 🔹 여기서 브랜드 추천용 body를 한 번만 깔끔하게 만든다
-    const body = {
-      lat: coords.latitude,
-      lng: coords.longitude,
-      l: brand.indutyLclasNm,   // 대분류 (예: "음식")
-      m: brand.indutyMlsfcNm,   // 중분류 (예: "한식")
-      radius: fv.radius || 300,
-      pois: storePois,          // 주변 상가 500개
-      topK: 20,
-      year: "2024",
-      strategy,                 // 백엔드는 안 써도 상관 없음 (무시됨)
-    };
+    // 예: 추천 기준 (인기 / 틈새) + 업종 분포 필터 상태가 있다고 치고
+// recommendBasis: "popular" | "niche"
+// densityFilter: "all" | "many" | "few"
+
+const body = {
+  lat: coords.latitude,
+  lng: coords.longitude,
+  l: brand.indutyLclasNm,
+  m: brand.indutyMlsfcNm,
+  radius: fv.radius || 300,
+  pois: storePois,
+  topK: 20,
+  year: "2024",
+
+  // 🔹 추천 기준 (인기 / 틈새)
+  recommendBasis,    // or strategy 같은 이름으로 통일해도 됨
+
+  // 🔹 업종 분포 필터 (많이 / 거의 없음)
+  densityFilter,     // "all" | "many" | "few"
+};
+
 
     // admmCd / areaCd는 값 있을 때만 붙이기
     if (inputs.admmCd) {
@@ -1537,7 +1547,7 @@ useEffect(() => {
       </View>
 
 
-      {/* 업종 분포 필터 (많이/적게 존재) */}
+      {/* 업종 분포 필터 (많이/적게 존재)
       <Text style={styles.subTitle}>업종 분포 필터</Text>
       <View style={styles.chipRow}>
         <Chip
@@ -1558,7 +1568,7 @@ useEffect(() => {
             )
           }
         />
-      </View>
+      </View>  */}
 
       {/* 실제 추천 리스트 */}
       {effectiveTop.length > 0 && (
