@@ -1,97 +1,240 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# 📌 프로젝트 수행 내용
 
-# Getting Started
+예비 창업자의 **상권·업종 선택 과정**을 다음의 5단계로 모델링하고, **주소/위치 하나를 기준으로 분산된 데이터(상권·인구·프랜차이즈)를 통합해 보여주는 것**을 서비스 핵심 목표로 정의하였다.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+1) 후보 지역 선정  
+2) 상권 정보 탐색  
+3) 지도 기반 상가 파악  
+4) 프랜차이즈 정보 수집  
+5) 최종 의사결정
 
-## Step 1: Start Metro
+---
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## 🧱 시스템 아키텍처 & 구현 범위
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+- **3계층 구조 설계**
+  - **React Native** 기반 모바일 앱
+  - **Node.js/Express** 기반 API 서버
+  - **MongoDB** 기반 데이터 저장소
 
-```sh
-# Using npm
-npm start
+- **주요 구현 기능**
+  - 지도 기반 검색 화면(주소/좌표 기반 탐색)
+  - 업종·프랜차이즈 추천 API 계층
+  - 입력 검증(Validation) 및 교차 출처 요청 처리(CORS)
+  - 클라이언트 ↔ 서버 ↔ DB 전반의 애플리케이션 흐름 구현
 
-# OR using Yarn
-yarn start
-```
+---
 
-## Step 2: Build and run your app
+## 🗂️ 데이터 수집/정제(ETL) 및 통합 데이터셋 구축
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+서로 다른 형식의 공공·민간 데이터를 수집/통합하기 위해 **Node.js 기반 ETL 모듈**을 설계·구현하였다.
 
-### Android
+- **데이터 출처**
+  - 행안부 인구
+  - 서울시 상권·결제
+  - 공정위 프랜차이즈
+  - 카카오맵 POI
 
-```sh
-# Using npm
-npm run android
+- **정제/통합 처리**
+  - 스키마 정규화
+  - 수치 변환
+  - 중복 방지
+  - API 호출 제어(레이트 리밋 등)
+  - 상권 좌표 보정
 
-# OR using Yarn
-yarn android
-```
+→ 위 과정을 통해 **통합 상권 데이터셋**을 구축하였다.
 
-### iOS
+---
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+## 🧠 업종·프랜차이즈 추천 알고리즘 설계/구현
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+업종 추천을 위한 핵심 알고리즘 모듈을 설계하여, 다양한 지표를 **하나의 특성 벡터(feature vector)**로 통합하고 추천 결과에 **설명 가능한 사유 문구**까지 함께 산출하도록 구현·튜닝하였다.
 
-```sh
-bundle install
-```
+- **특성 벡터 구성 요소**
+  - 인구
+  - 상권 지표
+  - RSB
+  - 경쟁도
+  - B2C/B2B 비율 등
 
-Then, and every time you update your native dependencies, run:
+- **전략 및 산출물**
+  - 업종을 **행동 패턴 기반 아키타입(템플릿)**으로 그룹화
+  - `gap(틈새형)` / `trend(인기형)` 전략 지원
+  - 프랜차이즈 점수:
+    - **Brand Health**
+    - **Local Fit**
+  - 추천 사유(설명 문구)까지 함께 출력
 
-```sh
-bundle exec pod install
-```
+---
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## 📈 백테스트 파이프라인 구성 및 성능 평가
 
-```sh
-# Using npm
-npm run ios
+- **데이터 스냅샷**
+  - 2023년 3월 / 2025년 6월 서울 상가 스냅샷 기반
 
-# OR using Yarn
-yarn ios
-```
+- **신규 점포 자동 추출**
+  - 두 시점 스냅샷 비교로 신규 점포를 자동 추출하는 스크립트 구현
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+- **평가 대상**
+  - 약 **2,000개 신규 점포**
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+- **평가 지표**
+  - `Hit@5`
+  - `Precision@5`
+  - `MRR`
+  - `NDCG`
+  - Random 기준선
+  - 경쟁도 지표
 
-## Step 3: Modify your app
+- **분석 결과**
+  - `baseline` / `gap` / `trend` 모델의 성능을 정량 비교·분석
 
-Now that you have successfully run the app, let's make changes!
+---
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+# 🔧 알고리즘 개선 과정
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+## 1) 초기 설계: gap 전략 중심 구조
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+초기에는 `gap(틈새형)` 전략 하나만 가정하고 설계하였다.
 
-## Congratulations! :tada:
+- **방식**
+  - 반경 내 상가의 중분류 업종 분포
+  - 인구(연령·성별)
+  - 상권 레벨
+  - 카드 결제 건수
+  - 업종 다양도
+  - RSB
+  - B2C/B2B 비율  
+  → 위 요소를 하나의 `feature vector`로 구성
 
-You've successfully run and modified your React Native App. :partying_face:
+- **점수 산정 구조**
+  - `score_base = Σ(feature_i * weight_i)`
+  - `final_score = score_base * multiplier(competition_share)`
+  - 경쟁도(share)를 강하게 패널티하여 “많은 업종은 피하고 적은 업종을 추천”하는 방향
 
-### Now what?
+- **추가 시도**
+  - 중·소분류 업종마다 개별 가중치 설정도 시도
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+---
 
-# Troubleshooting
+## 2) 문제점: 과도한 경쟁 패널티 + 튜닝 한계
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+백테스트 결과 다음 문제가 드러났다.
 
-# Learn More
+- 중·소분류별 개별 가중치는 업종 수가 너무 많고 희소성이 커 **관리·튜닝이 사실상 불가능**
+- `gap` 전략은 경쟁도를 지나치게 깎아 **Random보다 낮은 Hit@5·MRR·NDCG**를 보임
+- 반경 내 점포가 거의 없는 희소 업종을 과도하게 선호하여,
+  - 실제 신규 점포가 선택한 업종/경쟁도 분포와 **큰 괴리** 발생
 
-To learn more about React Native, take a look at the following resources:
+→ “실제 선택을 따르는 추천(trend/baseline)”과 “공백을 노리는 추천(gap)”의 **균형 필요성**을 확인
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+---
+
+## 3) 개선 방향: 아키타입 도입 + baseline·trend 전략 추가
+
+### ✅ 아키타입(템플릿) 기반 재설계
+유사 행동 패턴 업종들을 상위 그룹으로 묶어 구조를 단순화하였다.
+
+- 예시 아키타입
+  - 식사 중심(한식/중식/일식 등)
+  - 간식/카페(카페/디저트/분식 등)
+  - 뷰티/헬스(미용/의료/피트니스 등)
+
+- 효과
+  - 수십~수백 개 개별 업종 대신 **10여 개 내외 그룹 단위 가중치 조정**
+  - 희소성 문제 완화 + 결과 해석 일관성 개선
+
+### ✅ baseline / trend 전략 구현 및 3전략 비교
+- **baseline**: 반경 내 업종 분포만으로 점수 계산(빈도 기반)
+- **trend(인기형)**: 경쟁도가 높은 업종에 일정 보너스 부여
+- **gap(틈새형)**: 경쟁이 적은 업종을 탐색하는 옵션
+
+### 결론(역할 재정의)
+- baseline / trend: 실제 신규 점포 선택 패턴을 잘 반영하는 **현실적인 기준선**
+- gap: 경쟁이 적은 업종을 탐색할 때 참고용 **틈새 탐색 옵션**
+
+---
+
+# ⚠️ 미흡 사항 정리
+
+1. **최종 발표 시 데모 환경 점검 미흡**
+   - MongoDB 접속용 와이파이 IP를 허용 목록에 미등록 → 시연 중 DB 연결 오류 발생
+
+2. **업종 템플릿 분류의 수기 작업 의존**
+   - 중분류 업종 → 템플릿 매핑을 자동화 없이 수기로 진행
+
+3. **적용 지역 범위의 제한**
+   - 서울 지역 상권으로 한정 → 타 지역 일반화 검증 미흡
+
+4. **머신러닝 모델 미적용**
+   - 일정/난이도/데이터 특성 고려로 가중치 기반 방식 채택
+
+5. **프랜차이즈 단위 백테스트 미진행**
+   - 업종 단위만 수행, 개별 브랜드 단위 정량 검증 미흡
+
+6. **가중치 설정의 주관성**
+   - 통계적 근거/체계적 실험 절차 없이 직관 중심으로 설정
+
+---
+
+# ✅ 미흡 사항 보완 및 극복 방안
+
+## 1) 데모 환경 점검 미흡 대응
+- 원인: 코드/설계 문제가 아닌 **환경 설정(IP 허용 목록) 이슈**
+- 개선:
+  - DB 접속 허용 IP 사전 등록
+  - 리허설 체크리스트에 “프로그램 실행 전 점검 항목” 포함
+
+---
+
+## 2) 업종 템플릿 수기 분류 개선
+- `CATEGORY_ARCHETYPE` 상수 기반 분류 기준을 문서화
+  - 포함/제외 기준 및 예시 명시
+- 기존 수기 결과 일괄 재점검으로 오류 최소화
+- 공공기관 업종 분류 체계(통계청/소상공인 데이터 등)와 교차 검증
+- 자동화 방향
+  - 단기: 업종명 + 상권 특성 입력 → 템플릿 후보를 제안하는 규칙 기반 스크립트
+  - 중장기: 결제 패턴/방문 시간대/인접 업종 등으로 유사도 계산 → 클러스터링 기반 자동 템플릿 추천
+
+---
+
+## 3) 서울 지역 한정 적용 범위 확장
+- ETL 파이프라인을 지역 식별자 기준으로 **파라미터화**
+  - `REGION_CODE`, `REGION_NAME` 등을 매핑 테이블로 분리
+- 1~2개 타 지역(예: 수도권 인접 도시) 파일럿 실험
+  - 동일 지표 계산 및 추천 적용 → 지역별 조정 필요성 검증
+- 프론트엔드 개선
+  - 초기 지도 좌표/줌을 지역 선택 드롭다운/필터와 연동
+  - 다지역 전환 UX 제공
+
+---
+
+## 4) 머신러닝 모델 도입 계획
+- 필요 조건: 실제 입점/성공 여부 등의 **레이블 데이터 확보**
+- 계획:
+  - 상권별 입점·폐점 이력 + 월별 매출 추이 추가 수집
+  - 인구/상권/경쟁도 지표를 입력 변수로
+    - 입점 여부(분류)
+    - 매출 증가(회귀) 예측 모델 학습
+  - 기존 가중치 기반 방식과 성능 비교
+
+---
+
+## 5) 프랜차이즈 단위 백테스트 확장
+- 업종 스냅샷을 브랜드 코드/상호 포함 수준으로 재가공
+- 신규 입점 브랜드 추적 가능한 데이터셋 구성
+- 브랜드 표기 통합(띄어쓰기/약칭 등)용 정규화 매핑 테이블 구축
+- 기존 백테스트 로직(Hit@K, NDCG 등)을 재사용하여
+  - 추천 단위를 업종 → 프랜차이즈 브랜드로 교체해 확장
+
+---
+
+## 6) 가중치 설정 주관성 보완
+- 가중치 설계 문서화
+  - “왜 이 지표를 중요하게 봤는가”에 대한 가정/의도 기록
+- 데이터 기반 1차 보정
+  - 시계열 데이터 + 백테스트 결과로
+  - 지표 ↔ 실제 입점 간 상관관계 계산 후 반영
+- **민감도 분석(Sensitivity Analysis)** 수행
+  - 가중치를 ±10~20% 변화시키며 랭킹 변화 관찰
+  - 영향 과대/과소 지표를 찾아 조정
